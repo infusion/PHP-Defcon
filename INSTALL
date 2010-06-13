@@ -1,0 +1,15 @@
+Installing from sources
+
+   1. Unpack defcon source package
+   2. Go to defcon folder and type "phpize && ./configure && make && make install"
+   3. Make sure you have extension=defcon.so in your php.ini
+   4. Add the configuration lines from above in your php.ini
+
+Compiling Sysload into PHP
+
+   1. Unpack defcon source package to $PHP_SOURCE_DIR/ext/defcon
+   2. In php source root directory run commands: "rm configure && ./buildconf --force"
+   3. Configure PHP with command "./configure --with-defcon"
+   4. Run make && make install
+   5. Add the configuration lines from above in your php.ini
+
