@@ -21,7 +21,7 @@
 #define PHP_DEFCON_VERSION "1.0"
 #define PHP_DEFCON_EXTNAME "defcon"
 
-#define TYPELEN 64
+#define KEYWORDLEN 64
 #define NAMELEN 64
 #define VALUELEN 128
 
