@@ -164,7 +164,7 @@ static int config_read(struct defcon_context *ctx TSRMLS_DC);
 
 static int config_parse(struct defcon_context *ctx, char *s TSRMLS_DC) {
 	char kw[KEYWORDLEN + 1], N[NAMELEN + 1], V[VALUELEN + 1];
-	int i;
+	int i, extraline;
 	char c;
 	short KW, state = 0;
 
@@ -237,21 +237,30 @@ eat_whitespace:	for(; *s && (*s == ' ' || *s == '\n' || *s == '\t' || *s == '\r'
 				if(*s == '"' || *s == '\'') c = *(s++);
 				else c = '\0';;
 
-				for(i=0; *s && (c && *s != c || (!c && (*s >= '0' && *s<='9' || *s >= 'a' && *s<='z' || *s >= 'A' && *s<='Z' || *s == '.'))); s++, i++) {
+				for(extraline=i=0; *s && (c && *s != c || (!c && (*s >= '0' && *s<='9' || *s >= 'a' && *s<='z' || *s >= 'A' && *s<='Z' || *s == '.'))); s++, i++) {
 					if(i > VALUELEN) {
 						PR_ERR(ctx, "Value too long");
 						return 0;
 					}
 					V[i] = *s;
+					if (c && *s == '\n')
+						extraline++;
 				}
 
 				V[i] = '\0';
 
-				if(c) s++;
-				else if(V[0] == '\0') {
-					PR_ERR(ctx, "No Value found at '%c'", *s);
-					return 0;
-
+				if (c) {
+					if (!*s) {
+						PR_ERR(ctx, "Unterminated quoted string");
+						return 0;
+					}
+					ctx->line += extraline;
+				} else {
+					if (V[0] == '\0') {
+						PR_ERR(ctx, "No Value found at '%c'", *s);
+						return 0;
+					}
+					s--;
 				}
 				if (!add_constant(ctx, KW, N, V TSRMLS_CC))
 					return 0;
