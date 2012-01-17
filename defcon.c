@@ -190,7 +190,7 @@ static int config_parse(struct defcon_context *ctx, char *s TSRMLS_DC) {
 			   case 0: // catch keyword
 				for(i = 0; *s && (*s >= 'a' && *s <= 'z' || *s >= 'A' && *s <= 'Z'); s++, i++) {
 					if(i > KEYWORDLEN) {
-						PR_ERR(ctx, "Typ too long");
+						PR_ERR(ctx, "Keyword too long");
 						return 0;
 					}
 					kw[i] = *s;
@@ -198,7 +198,7 @@ static int config_parse(struct defcon_context *ctx, char *s TSRMLS_DC) {
 				kw[i] = '\0';
 				KW = match_keyword(kw);
 				if(-1 == KW) {
-					PR_ERR(ctx, "No valid KW (%s)", kw);
+					PR_ERR(ctx, "No valid keyword (%s)", kw);
 					return 0;
 				}
 				state = 1;
@@ -206,19 +206,19 @@ static int config_parse(struct defcon_context *ctx, char *s TSRMLS_DC) {
 			   case 1: // catch varname
 				for(i = 0; *s >= 'a' && *s <= 'z' || *s >= 'A' && *s <= 'Z' || *s >= '0' && *s <= '9' || *s == '_'; s++, i++) {
 					if(i > NAMELEN) {
-						PR_ERR(ctx, "Varname too long");
+						PR_ERR(ctx, "Constant name too long");
 						return 0;
 					}
 					N[i] = *s;
 				}
 				N[i] = '\0';
 				if(N[0] == '\0') {
-					PR_ERR(ctx, "No Varname set");
+					PR_ERR(ctx, "No Constant name set");
 					return 0;
 				}
 
 				if(-1 != match_keyword(V)) {
-					PR_ERR(ctx, "Varname should not be a keyword");
+					PR_ERR(ctx, "Constant name should not be a keyword");
 					return 0;
 				}
 
@@ -227,7 +227,7 @@ static int config_parse(struct defcon_context *ctx, char *s TSRMLS_DC) {
 				break;
 				case 2: // catch =
 				if(*s != '=') {
-					PR_ERR(ctx, "Strange input ( = required)", *s);
+					PR_ERR(ctx, "Strange input '%c' ('=' required)", *s);
 					return 0;
 				}
 				state = 3;
@@ -248,7 +248,7 @@ static int config_parse(struct defcon_context *ctx, char *s TSRMLS_DC) {
 
 				if(c) s++;
 				else if(V[0] == '\0') {
-					PR_ERR(ctx, "No Value found");
+					PR_ERR(ctx, "No Value found at '%c'", *s);
 					return 0;
 
 				}
