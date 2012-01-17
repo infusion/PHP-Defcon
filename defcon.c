@@ -64,19 +64,22 @@ PHP_MINFO_FUNCTION(defcon) {
 
 struct defcon_keyword {
 	char *name;
+	int state;	// state to switch to when found
 };
 
 static struct defcon_keyword keywords[] = {
-/*  0 */	{ "string" },
-/*  1 */	{ "int" },
-/*  2 */	{ "long" },
-/*  3 */	{ "float" },
-/*  4 */	{ "real" },
-/*  5 */	{ "double" },
-/*  6 */	{ "bool" },
-/*  7 */	{ "boolean" },
-/*  8 */	{ "logical" },
-/*  9 */	{ "short" },
+/*  0 */	{ "string",	1 },
+/*  1 */	{ "int",	1 },
+/*  2 */	{ "long",	1 },
+/*  3 */	{ "float",	1 },
+/*  4 */	{ "real",	1 },
+/*  5 */	{ "double",	1 },
+/*  6 */	{ "bool",	1 },
+/*  7 */	{ "boolean",	1 },
+/*  8 */	{ "logical",	1 },
+/*  9 */	{ "short",	1 },
+/* 10 */	{ "require",	5 },
+/* 11 */	{ "include",	5 },
 };
 #define NR_KW (sizeof(keywords)/sizeof(keywords[0]))
 
@@ -160,134 +163,237 @@ TSRMLS_DC) {
 	return 1;
 }
 
-static int config_read(struct defcon_context *ctx TSRMLS_DC);
+#define WS(C) (C == ' ' || C == '\n' || C == '\t' || C == '\r')
+#define ALPHA(C) ((C >= 'a' && C <= 'z') || (C >= 'A' && C <= 'Z'))
+#define ALNUM(C) (ALPHA(C) || (C >= '0' && C <= '9') || C == '_')
+
+static int parse_keyword(
+	struct defcon_context *ctx,
+	char **sp,
+	char *kw
+) {
+	int i;
+	for (i = 0; ALPHA(**sp); (*sp)++, i++) {
+		if (i > KEYWORDLEN) {
+			PR_ERR(ctx, "Keyword too long");
+			return 0;
+		}
+		kw[i] = **sp;
+	}
+	kw[i] = '\0';
+	return i;
+}
+
+static int parse_constantname(
+	struct defcon_context *ctx,
+	char **sp,
+	char *N
+) {
+	int i;
+
+	for (i = 0; ALNUM(**sp); (*sp)++, i++) {
+		if (i > NAMELEN) {
+			PR_ERR(ctx, "Constant name too long");
+			return 0;
+		}
+		N[i] = **sp;
+	}
+	N[i] = '\0';
+	if (i == 0) {
+		PR_ERR(ctx, "No Constant name set");
+		return 0;
+	}
+
+	return i;
+}
+
+static int parse_value(
+	struct defcon_context *ctx,
+	char **sp,
+	char *V,
+	char *kind
+) {
+	int i, quote = (**sp == '"' || **sp == '\'') ? *((*sp)++) : '\0';
+	int extraline = 0;
+
+	for (i = 0;
+	    (quote && **sp && **sp != quote)
+	    || (!quote && **sp && **sp != ',' && **sp != ';' && !WS(**sp));
+	    (*sp)++, i++) {
+		if (i > VALUELEN) {
+			PR_ERR(ctx, "%s too long", kind);
+			return 0;
+		}
+		V[i] = **sp;
+		if (quote && **sp == '\n')
+			extraline++;
+	}
+
+	V[i] = '\0';
+
+	if (quote) {
+		if (!**sp) {
+			PR_ERR(ctx, "Unterminated quoted string");
+			return 0;
+		}
+		(*sp)++;
+		ctx->line += extraline;
+	} else if (i == 0) {
+		PR_ERR(ctx, "No %s found at '%c'", kind, **sp);
+		return 0;
+	}
+
+	return i;
+}
+
+static int config_read(struct defcon_context *ctx, int KW TSRMLS_DC);
 
 static int config_parse(struct defcon_context *ctx, char *s TSRMLS_DC) {
 	char kw[KEYWORDLEN + 1], N[NAMELEN + 1], V[VALUELEN + 1];
-	int i, extraline;
-	char c;
-	short KW, state = 0;
+	int i, j;
+	char c, *ps;
+	short KW, maybe_KW;
+	short prev_state = 0, state = 0;
 
-	for(; *s; s++) {
-
-eat_whitespace:	for(; *s && (*s == ' ' || *s == '\n' || *s == '\t' || *s == '\r'); s++) {
-			if(*s == '\n') ctx->line++;
+// helper macro for state transition
+#define TRANSIT(NEWSTATE, FMT, ...) do { \
+	PR_DBG(ctx, "defcon(%i->%i)" FMT "\n", \
+		 state, NEWSTATE, ## __VA_ARGS__); \
+	prev_state = state; \
+	state = NEWSTATE; \
+} while (0)
+	
+	ps = NULL;
+	while (*s) {
+		if (s == ps) { // avoid endless loops due to programming error
+			PR_ERR(ctx, "NO PROGRESS");
+			return 0;
 		}
+		ps = s;
 
-		if(!*s)
-		   break;
-
-		if(*s == '#') {
-			for(; *s && *s != '\n'; s++);
-			goto eat_whitespace;
-		} else {
-
-			if(*s == ',')
-			  state = 4;
-			else if(*s == ';')
-			  state = 5;
-
-			switch(state) {
-			   case 0: // catch keyword
-				for(i = 0; *s && (*s >= 'a' && *s <= 'z' || *s >= 'A' && *s <= 'Z'); s++, i++) {
-					if(i > KEYWORDLEN) {
-						PR_ERR(ctx, "Keyword too long");
-						return 0;
-					}
-					kw[i] = *s;
+		for (; WS(*s); s++, ps++) {
+			if(*s == '\n') {
+				if (state == 4 || state == 6) {
+					// accept newline instead of ',' or ';'
+					TRANSIT(0, " at \\n");
 				}
-				kw[i] = '\0';
-				KW = match_keyword(kw);
-				if(-1 == KW) {
-					PR_ERR(ctx, "No valid keyword (%s)", kw);
-					return 0;
-				}
-				state = 1;
-				break;
-			   case 1: // catch varname
-				for(i = 0; *s >= 'a' && *s <= 'z' || *s >= 'A' && *s <= 'Z' || *s >= '0' && *s <= '9' || *s == '_'; s++, i++) {
-					if(i > NAMELEN) {
-						PR_ERR(ctx, "Constant name too long");
-						return 0;
-					}
-					N[i] = *s;
-				}
-				N[i] = '\0';
-				if(N[0] == '\0') {
-					PR_ERR(ctx, "No Constant name set");
-					return 0;
-				}
-
-				if(-1 != match_keyword(N)) {
-					PR_ERR(ctx, "Constant name should not be a keyword");
-					return 0;
-				}
-
-				state = 2;
-				s--;
-				break;
-				case 2: // catch =
-				if(*s != '=') {
-					PR_ERR(ctx, "Strange input '%c' ('=' required)", *s);
-					return 0;
-				}
-				state = 3;
-				break;
-			   case 3: // final state
-				if(*s == '"' || *s == '\'') c = *(s++);
-				else c = '\0';;
-
-				for(extraline=i=0; *s && (c && *s != c || (!c && (*s >= '0' && *s<='9' || *s >= 'a' && *s<='z' || *s >= 'A' && *s<='Z' || *s == '.'))); s++, i++) {
-					if(i > VALUELEN) {
-						PR_ERR(ctx, "Value too long");
-						return 0;
-					}
-					V[i] = *s;
-					if (c && *s == '\n')
-						extraline++;
-				}
-
-				V[i] = '\0';
-
-				if (c) {
-					if (!*s) {
-						PR_ERR(ctx, "Unterminated quoted string");
-						return 0;
-					}
-					ctx->line += extraline;
-				} else {
-					if (V[0] == '\0') {
-						PR_ERR(ctx, "No Value found at '%c'", *s);
-						return 0;
-					}
-					s--;
-				}
-				if (!add_constant(ctx, KW, N, V TSRMLS_CC))
-					return 0;
-
-				state = 0;
-				break;
-			   case 4: // , found
-				state = 1;
-				break;
-			   case 5: // ; found
-				state = 0;
-				break;
-
+				ctx->line++;
 			}
 		}
+
+		if (!*s)
+			break;
+
+		if (*s == '#') {
+			for(; *s && *s != '\n'; s++);
+			continue;
+		}
+
+		switch (state) {
+		   case 0: // catch keyword
+			if (0 >= (i = parse_keyword(ctx, &s, kw)))
+				return 0;
+
+			KW = match_keyword(kw);
+			if (-1 == KW) {
+				PR_ERR(ctx, "No valid keyword (%s)", kw);
+				return 0;
+			}
+			TRANSIT(keywords[KW].state, " KW %.*s", i, kw);
+			break;
+		   case 1: // ENTRY for type keywords: catch varname
+			if (0 >= (i = parse_constantname(ctx, &s, N)))
+				return 0;
+
+			maybe_KW = match_keyword(N);
+			if (-1 != maybe_KW) {
+				if (prev_state != 4) { // NOT after comma
+					PR_ERR(ctx, "Constant name should"
+						    " not be a keyword");
+					return 0;
+				}
+				KW = maybe_KW;
+				TRANSIT(keywords[KW].state, " KW %.*s", i, N);
+				break;
+			}
+
+			TRANSIT(2, " name %.*s", i, N);
+			break;
+		   case 2: // catch =
+			if (*s != '=') {
+				PR_ERR(ctx, "Strange input '%c' ('=' required)",
+					*s);
+				return 0;
+			}
+			TRANSIT(3, " on equal sign");
+			s++;
+			break;
+		   case 3: // final state - value
+			if (0 >= (i = parse_value(ctx, &s, V, "Value")))
+				return 0;
+
+			if (!add_constant(ctx, KW, N, V TSRMLS_CC))
+				return 0;
+
+			TRANSIT(4, " value '%.*s'", i, V);
+			break;
+		   case 4: // after a constant definition - see how it goes on
+			if (*s == ',') {
+				TRANSIT(1, " comma");
+				s++;
+				break;
+			}
+			if (*s == ';') {
+				TRANSIT(0, " semicolon");
+				s++;
+				break;
+			}
+			PR_ERR(ctx, "Invalid '%c'", *s);
+			return 0;
+		   case 5: // ENTRY for keywords 'include' and 'require'
+			if (0 >= (i = parse_value(ctx, &s, V, "Pathname")))
+				return 0;
+
+			struct defcon_context Nctx[1];
+			Nctx->module_number = ctx->module_number;
+			Nctx->file = V;
+			Nctx->line = 1;
+			if (!config_read(Nctx, KW TSRMLS_CC) && KW == 10)
+				return 0;
+
+			TRANSIT(6, "");
+			break;
+		   case 6: // after include/require - see how it goes on
+			if (*s == ',') {
+				TRANSIT(5, " comma");
+				s++;
+				break;
+			}
+			if (*s == ';') {
+				TRANSIT(0, " semicolon");
+				s++;
+				break;
+			}
+			PR_ERR(ctx, "Invalid '%c'", *s);
+			return 0;
+		}
 	}
+
 	return 1;
 }
 
-static int config_read(struct defcon_context *ctx TSRMLS_DC)
+static int config_read(struct defcon_context *ctx, int KW TSRMLS_DC)
 {
 	FILE *fd;
 	struct stat st;
 	int res;
 
 	if (0 > stat(ctx->file, &st) || !(fd = VCWD_FOPEN(ctx->file, "r"))) {
-		PR_ERR(ctx, "Cannot open for reading");
+		if (KW != 11) {	// require or toplevel
+			PR_ERR(ctx, "Cannot open for reading");
+		} else {
+			PR_DBG(ctx, "Cannot open for reading");
+		}
 		return 0;
 	}
 
@@ -329,7 +435,7 @@ PHP_MINIT_FUNCTION(defcon) {
 		return SUCCESS;
 	}
 
-	config_read(ctx TSRMLS_CC);
+	config_read(ctx, -1 TSRMLS_CC);
 
 	return SUCCESS;
 }
