@@ -217,7 +217,7 @@ static int config_parse(struct defcon_context *ctx, char *s TSRMLS_DC) {
 					return 0;
 				}
 
-				if(-1 != match_keyword(V)) {
+				if(-1 != match_keyword(N)) {
 					PR_ERR(ctx, "Constant name should not be a keyword");
 					return 0;
 				}
