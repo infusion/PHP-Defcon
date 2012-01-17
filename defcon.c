@@ -170,7 +170,7 @@ static int config_parse(struct defcon_context *ctx, char *s TSRMLS_DC) {
 
 	for(; *s; s++) {
 
-		for(; *s && (*s == ' ' || *s == '\n' || *s == '\t' || *s == '\r'); s++) {
+eat_whitespace:	for(; *s && (*s == ' ' || *s == '\n' || *s == '\t' || *s == '\r'); s++) {
 			if(*s == '\n') ctx->line++;
 		}
 
@@ -179,6 +179,7 @@ static int config_parse(struct defcon_context *ctx, char *s TSRMLS_DC) {
 
 		if(*s == '#') {
 			for(; *s && *s != '\n'; s++);
+			goto eat_whitespace;
 		} else {
 
 			if(*s == ',')

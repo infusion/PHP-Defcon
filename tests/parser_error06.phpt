@@ -7,5 +7,5 @@ defcon.config-file = tests/parser_error06.conf
 echo "OK\n";
 ?>
 --EXPECT--
-Fatal error: defcon: tests/parser_error06.conf line 2: Constant name should not be a keyword in Unknown on line 0
+Fatal error: defcon: tests/parser_error06.conf line 7: Constant name should not be a keyword in Unknown on line 0
 OK

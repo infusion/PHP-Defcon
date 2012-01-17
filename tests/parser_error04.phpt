@@ -7,5 +7,5 @@ defcon.config-file = tests/parser_error04.conf
 echo "OK\n";
 ?>
 --EXPECT--
-Fatal error: defcon: tests/parser_error04.conf line 2: Constant name too long in Unknown on line 0
+Fatal error: defcon: tests/parser_error04.conf line 7: Constant name too long in Unknown on line 0
 OK
