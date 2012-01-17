@@ -106,7 +106,7 @@ PHP_MINIT_FUNCTION(defcon) {
 			return SUCCESS;
 		}
 
-		char *s, *str = emalloc(st.st_size);
+		char *s, *str = emalloc(st.st_size + 1);
 		s = str;
 
 		for(i=0, c=0; c != EOF; i++) {
