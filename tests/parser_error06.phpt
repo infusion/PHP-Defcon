@@ -1,5 +1,5 @@
 --TEST--
-Unknown keyword parser error handling
+Constant name is keyword parser error handling
 --INI--
 defcon.config-file = tests/parser_error06.conf
 --FILE--
