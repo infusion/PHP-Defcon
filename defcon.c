@@ -18,6 +18,11 @@
 // set to 1 to enable copious "stderr" debug output during parse
 #define DEBUG_OUTPUT 0
 
+#include <sys/types.h>
+#include <dirent.h>
+#include <stddef.h>
+#include <unistd.h>
+
 #ifdef HAVE_CONFIG_H
 #include "config.h"
 #endif
@@ -382,22 +387,71 @@ static int config_parse(struct defcon_context *ctx, char *s TSRMLS_DC) {
 	return 1;
 }
 
+static int config_read_dir(struct defcon_context *ctx, int KW TSRMLS_DC)
+{
+	struct dirent *de, *dep;
+	DIR *dir = opendir(ctx->file);
+	int len, res;
+	struct defcon_context Nctx[1];
+
+	if (!dir)
+		goto error;
+
+	// see "man 3 readdir" regarding the reentrant readdir_r and
+	// how to allocate its arguments.
+	de = emalloc(offsetof(struct dirent, d_name)
+		     + pathconf(ctx->file, _PC_NAME_MAX)
+		     + 1);
+	res = 1;
+	while (res && 0 == readdir_r(dir, de, &dep)) {
+		if (!dep)
+			break;
+		len = strlen(de->d_name);
+		if (len < 6 || 0 != strcmp(".conf", de->d_name + len - 5))
+			continue;
+		Nctx->module_number = ctx->module_number;
+		Nctx->file = emalloc(strlen(ctx->file) + 1 + len + 1);
+		Nctx->line = 1;
+		sprintf(Nctx->file, "%s/%s", ctx->file, de->d_name);
+		if (!config_read(Nctx, KW TSRMLS_CC) && KW == 10)
+			res = 0;
+		efree(Nctx->file);
+	}
+	efree(de);
+	return res;
+
+error:
+	if (KW != 11) { // require or toplevel
+		PR_ERR(ctx, "Cannot open directory for reading");
+	} else {
+		PR_DBG(ctx, "Cannot open directory for reading\n");
+	}
+	return 0;
+}
+
 static int config_read(struct defcon_context *ctx, int KW TSRMLS_DC)
 {
 	FILE *fd;
 	struct stat st;
 	int res;
 
-	if (0 > stat(ctx->file, &st) || !(fd = VCWD_FOPEN(ctx->file, "r"))) {
-		if (KW != 11) {	// require or toplevel
+	if (0 > stat(ctx->file, &st)) {
+no_such_file:	if (KW != 11) {	// require or toplevel
 			PR_ERR(ctx, "Cannot open for reading");
 		} else {
-			PR_DBG(ctx, "Cannot open for reading");
+			PR_DBG(ctx, "Cannot open for reading\n");
 		}
 		return 0;
 	}
 
+	if (S_ISDIR(st.st_mode))
+		return config_read_dir(ctx, KW TSRMLS_CC);
+
+	if (!(fd = VCWD_FOPEN(ctx->file, "r")))
+		goto no_such_file;
+
 	if (!st.st_size) {
+		fclose(fd);
 		PR_WARN(ctx, "file is empty");
 		return 0;
 	}
@@ -407,6 +461,7 @@ static int config_read(struct defcon_context *ctx, int KW TSRMLS_DC)
 	size_t slen = fread(str, 1, st.st_size, fd);
 	if (slen < 1) {
 		efree(str);
+		fclose(fd);
 		PR_WARN(ctx, "file is empty");
 		return 0;
 	}
