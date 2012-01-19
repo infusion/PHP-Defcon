@@ -45,9 +45,9 @@ You could also include an entire directory like this:
 Installation
 ============
 
-Download defcon source package
-Unpack defcon source package
-Go to defcon folder and type "phpize && ./configure && make && make install"
-Make sure you have extension=defcon.so in your php.ini
-Add the configuration lines from above in your /etc/defcon.conf
+	* Download defcon source package
+	* Unpack defcon source package
+	* Go to defcon folder and type "phpize && ./configure && make && make install"
+	* Make sure you have extension=defcon.so in your php.ini
+	* Add the configuration lines from above in your /etc/defcon.conf
 
