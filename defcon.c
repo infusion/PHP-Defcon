@@ -67,28 +67,44 @@ PHP_MINFO_FUNCTION(defcon) {
     php_info_print_table_end();
 }
 
+enum defcon_keyword_id {
+	KW_INVALID	= -1,
+	KW_STRING	= 0,
+	KW_INT		= 1,
+	KW_LONG		= 2,
+	KW_FLOAT	= 3,
+	KW_REAL		= 4,
+	KW_DOUBLE	= 5,
+	KW_BOOL		= 6,
+	KW_BOOLEAN	= 7,
+	KW_LOGICAL	= 8,
+	KW_SHORT	= 9,
+	KW_REQUIRE	= 10,
+	KW_INCLUDE	= 11,
+};
+
 struct defcon_keyword {
 	char *name;
 	int state;	// state to switch to when found
 };
 
 static struct defcon_keyword keywords[] = {
-/*  0 */	{ "string",	1 },
-/*  1 */	{ "int",	1 },
-/*  2 */	{ "long",	1 },
-/*  3 */	{ "float",	1 },
-/*  4 */	{ "real",	1 },
-/*  5 */	{ "double",	1 },
-/*  6 */	{ "bool",	1 },
-/*  7 */	{ "boolean",	1 },
-/*  8 */	{ "logical",	1 },
-/*  9 */	{ "short",	1 },
-/* 10 */	{ "require",	5 },
-/* 11 */	{ "include",	5 },
+[KW_STRING] =	{ "string",	1 },
+[KW_INT] =	{ "int",	1 },
+[KW_LONG] =	{ "long",	1 },
+[KW_FLOAT] =	{ "float",	1 },
+[KW_REAL] =	{ "real",	1 },
+[KW_DOUBLE] =	{ "double",	1 },
+[KW_BOOL] =	{ "bool",	1 },
+[KW_BOOLEAN] =	{ "boolean",	1 },
+[KW_LOGICAL] =	{ "logical",	1 },
+[KW_SHORT] =	{ "short",	1 },
+[KW_REQUIRE] =	{ "require",	5 },
+[KW_INCLUDE] =	{ "include",	5 },
 };
 #define NR_KW (sizeof(keywords)/sizeof(keywords[0]))
 
-static short match_keyword(
+static enum defcon_keyword_id match_keyword(
 	const char *g
 ) {
 	int i;
@@ -96,7 +112,7 @@ static short match_keyword(
 		if (0 == strcasecmp(keywords[i].name, g))
 		return i;
 	}
-	return -1;
+	return KW_INVALID;
 }
 
 
@@ -122,33 +138,33 @@ struct defcon_context {
 
 static int add_constant(
 	struct defcon_context *ctx,
-	short KW,
+	enum defcon_keyword_id KW,
 	char *N,
 	char *V
 TSRMLS_DC) {
 	zend_constant zc;
 
 	switch (KW) {
-	   case 0:
+	   case KW_STRING:
 		zc.value.type = IS_STRING;
 		zc.value.value.str.val = zend_strndup(V, strlen(V));
 		zc.value.value.str.len = strlen(V);
 		break;
-	   case 1:
-	   case 2:
-	   case 9:
+	   case KW_INT:
+	   case KW_LONG:
+	   case KW_SHORT:
 		zc.value.type = IS_LONG;
 		zc.value.value.lval = atol(V);
 		break;
-	   case 3:
-	   case 4:
-	   case 5:
+	   case KW_FLOAT:
+	   case KW_REAL:
+	   case KW_DOUBLE:
 		zc.value.type = IS_DOUBLE;
 		zc.value.value.dval = atof(V);
 		break;
-	   case 6:
-	   case 7:
-	   case 8:
+	   case KW_BOOL:
+	   case KW_BOOLEAN:
+	   case KW_LOGICAL:
 		zc.value.type = IS_BOOL;
 		if (0 == strcasecmp(V, "true")) {
 			zc.value.value.lval = 1;
@@ -253,7 +269,10 @@ static int parse_value(
 	return i;
 }
 
-static int config_read(struct defcon_context *ctx, int KW TSRMLS_DC);
+static int config_read(
+	struct defcon_context *ctx,
+	enum defcon_keyword_id KW
+TSRMLS_DC);
 
 static int config_parse(
 	struct defcon_context *ctx,
@@ -262,7 +281,7 @@ TSRMLS_DC) {
 	char kw[KEYWORDLEN + 1], N[NAMELEN + 1], V[VALUELEN + 1];
 	int i, j;
 	char c, *ps;
-	short KW, maybe_KW;
+	enum defcon_keyword_id KW, maybe_KW;
 	short prev_state = 0, state = 0;
 
 // helper macro for state transition
@@ -305,7 +324,7 @@ TSRMLS_DC) {
 				return 0;
 
 			KW = match_keyword(kw);
-			if (-1 == KW) {
+			if (KW_INVALID == KW) {
 				PR_ERR(ctx, "No valid keyword (%s)", kw);
 				return 0;
 			}
@@ -316,7 +335,7 @@ TSRMLS_DC) {
 				return 0;
 
 			maybe_KW = match_keyword(N);
-			if (-1 != maybe_KW) {
+			if (KW_INVALID != maybe_KW) {
 				if (prev_state != 4) { // NOT after comma
 					PR_ERR(ctx, "Constant name should"
 						    " not be a keyword");
@@ -368,7 +387,8 @@ TSRMLS_DC) {
 			Nctx->module_number = ctx->module_number;
 			Nctx->file = V;
 			Nctx->line = 1;
-			if (!config_read(Nctx, KW TSRMLS_CC) && KW == 10)
+			if (	!config_read(Nctx, KW TSRMLS_CC)
+			     && KW == KW_REQUIRE)
 				return 0;
 
 			TRANSIT(6, "");
@@ -394,7 +414,7 @@ TSRMLS_DC) {
 
 static int config_read_dir(
 	struct defcon_context *ctx,
-	int KW
+	enum defcon_keyword_id KW
 TSRMLS_DC) {
 	struct dirent *de, *dep;
 	DIR *dir = opendir(ctx->file);
@@ -420,7 +440,7 @@ TSRMLS_DC) {
 		Nctx->file = emalloc(strlen(ctx->file) + 1 + len + 1);
 		Nctx->line = 1;
 		sprintf(Nctx->file, "%s/%s", ctx->file, de->d_name);
-		if (!config_read(Nctx, KW TSRMLS_CC) && KW == 10)
+		if (!config_read(Nctx, KW TSRMLS_CC) && KW == KW_REQUIRE)
 			res = 0;
 		efree(Nctx->file);
 	}
@@ -428,7 +448,7 @@ TSRMLS_DC) {
 	return res;
 
 error:
-	if (KW != 11) { // require or toplevel
+	if (KW != KW_INCLUDE) { // require or toplevel
 		PR_ERR(ctx, "Cannot open directory for reading");
 	} else {
 		PR_DBG(ctx, "Cannot open directory for reading\n");
@@ -438,26 +458,20 @@ error:
 
 static int config_read(
 	struct defcon_context *ctx,
-	int KW
+	enum defcon_keyword_id KW
 TSRMLS_DC) {
 	FILE *fd;
 	struct stat st;
 	int res;
 
-	if (0 > stat(ctx->file, &st)) {
-no_such_file:	if (KW != 11) {	// require or toplevel
-			PR_ERR(ctx, "Cannot open for reading");
-		} else {
-			PR_DBG(ctx, "Cannot open for reading\n");
-		}
-		return 0;
-	}
+	if (0 > stat(ctx->file, &st))
+		goto error;
 
 	if (S_ISDIR(st.st_mode))
 		return config_read_dir(ctx, KW TSRMLS_CC);
 
 	if (!(fd = VCWD_FOPEN(ctx->file, "r")))
-		goto no_such_file;
+		goto error;
 
 	if (!st.st_size) {
 		fclose(fd);
@@ -484,6 +498,13 @@ no_such_file:	if (KW != 11) {	// require or toplevel
 	if (!res)
 		PR_DBG(ctx, "PARSING ERROR\n");
 	return res;
+
+error:	if (KW != KW_INCLUDE) {	// require or toplevel
+		PR_ERR(ctx, "Cannot open for reading");
+	} else {
+		PR_DBG(ctx, "Cannot open for reading\n");
+	}
+	return 0;
 }
 
 PHP_MINIT_FUNCTION(defcon) {
@@ -499,7 +520,7 @@ PHP_MINIT_FUNCTION(defcon) {
 		return SUCCESS;
 	}
 
-	config_read(ctx, -1 TSRMLS_CC);
+	config_read(ctx, KW_INVALID TSRMLS_CC);
 
 	return SUCCESS;
 }
