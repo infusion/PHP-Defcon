@@ -1,5 +1,5 @@
 --TEST--
-basic_good.conf configuration reading
+good_basic.conf configuration reading
 --INI--
 defcon.config-file = tests/good_basic.conf
 --FILE--

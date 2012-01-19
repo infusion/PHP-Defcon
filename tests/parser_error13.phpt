@@ -1,5 +1,5 @@
 --TEST--
-Multiline quoted string line count parser error handling
+Check multiline quoted string line count
 --INI--
 defcon.config-file = tests/parser_error13.conf
 --FILE--

@@ -1,5 +1,5 @@
 --TEST--
-Missing equal sign parser error handling
+Fail missing equal sign
 --INI--
 defcon.config-file = tests/parser_error07.conf
 --FILE--

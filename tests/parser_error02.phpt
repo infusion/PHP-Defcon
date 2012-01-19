@@ -1,5 +1,5 @@
 --TEST--
-Unknown keyword parser error handling
+Fail unknown keyword
 --INI--
 defcon.config-file = tests/parser_error02.conf
 --FILE--
