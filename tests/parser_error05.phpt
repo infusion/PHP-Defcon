@@ -1,5 +1,5 @@
 --TEST--
-Empty constant name parser error handling
+Fail empty constant name
 --INI--
 defcon.config-file = tests/parser_error05.conf
 --FILE--

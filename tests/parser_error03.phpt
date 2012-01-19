@@ -1,5 +1,5 @@
 --TEST--
-Overly long keyword parser error handling
+Fail overly long keyword
 --INI--
 defcon.config-file = tests/parser_error03.conf
 --FILE--

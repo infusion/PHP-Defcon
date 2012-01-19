@@ -1,5 +1,5 @@
 --TEST--
-Constant redefinition parser error handling
+Fail constant redefinition
 --INI--
 defcon.config-file = tests/parser_error10.conf
 --FILE--

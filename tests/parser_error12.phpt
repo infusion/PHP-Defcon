@@ -1,5 +1,5 @@
 --TEST--
-Unterminated quoted string parser error handling
+Fail unterminated quoted string
 --INI--
 defcon.config-file = tests/parser_error12.conf
 --FILE--
