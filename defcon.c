@@ -88,7 +88,9 @@ static struct defcon_keyword keywords[] = {
 };
 #define NR_KW (sizeof(keywords)/sizeof(keywords[0]))
 
-static short match_keyword(const char *g) {
+static short match_keyword(
+	const char *g
+) {
 	int i;
 	for (i = 0; i < NR_KW; i++) {
 		if (0 == strcasecmp(keywords[i].name, g))
@@ -253,7 +255,10 @@ static int parse_value(
 
 static int config_read(struct defcon_context *ctx, int KW TSRMLS_DC);
 
-static int config_parse(struct defcon_context *ctx, char *s TSRMLS_DC) {
+static int config_parse(
+	struct defcon_context *ctx,
+	char *s
+TSRMLS_DC) {
 	char kw[KEYWORDLEN + 1], N[NAMELEN + 1], V[VALUELEN + 1];
 	int i, j;
 	char c, *ps;
@@ -387,8 +392,10 @@ static int config_parse(struct defcon_context *ctx, char *s TSRMLS_DC) {
 	return 1;
 }
 
-static int config_read_dir(struct defcon_context *ctx, int KW TSRMLS_DC)
-{
+static int config_read_dir(
+	struct defcon_context *ctx,
+	int KW
+TSRMLS_DC) {
 	struct dirent *de, *dep;
 	DIR *dir = opendir(ctx->file);
 	int len, res;
@@ -429,8 +436,10 @@ error:
 	return 0;
 }
 
-static int config_read(struct defcon_context *ctx, int KW TSRMLS_DC)
-{
+static int config_read(
+	struct defcon_context *ctx,
+	int KW
+TSRMLS_DC) {
 	FILE *fd;
 	struct stat st;
 	int res;
