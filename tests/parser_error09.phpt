@@ -1,5 +1,5 @@
 --TEST--
-No value found parser error handling
+Fail missing value
 --INI--
 defcon.config-file = tests/parser_error09.conf
 --FILE--

@@ -1,5 +1,5 @@
 --TEST--
-Empty configuration file handling
+Handle empty configuration file
 --INI--
 defcon.config-file = tests/parser_error01.conf
 --FILE--

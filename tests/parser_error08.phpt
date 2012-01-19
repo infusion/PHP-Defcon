@@ -1,5 +1,5 @@
 --TEST--
-Value too long parser error handling
+Fail overly long value
 --INI--
 defcon.config-file = tests/parser_error08.conf
 --FILE--

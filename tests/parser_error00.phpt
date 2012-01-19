@@ -1,5 +1,5 @@
 --TEST--
-Missing configuration file handling
+Handle missing configuration file
 --INI--
 defcon.config-file = tests/parser_error00.conf
 --FILE--

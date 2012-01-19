@@ -1,5 +1,5 @@
 --TEST--
-Unknown keyword parser error handling
+Fail overly long constant name
 --INI--
 defcon.config-file = tests/parser_error04.conf
 --FILE--
