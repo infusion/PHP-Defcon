@@ -31,7 +31,7 @@ A Better alternative would be using Defcon. An Example config file could look li
 	logical T7 = false;
 	logical T8 = 234;
 
-	require '/var/www/vhosts/example.com/defcon.conf'
+	require '/var/admin/defcon.global.conf'
 
 Just add this line to your php.ini file:
 
@@ -45,9 +45,9 @@ You could also include an entire directory like this:
 Installation
 ============
 
-	* Download defcon source package
-	* Unpack defcon source package
-	* Go to defcon folder and type "phpize && ./configure && make && make install"
-	* Make sure you have extension=defcon.so in your php.ini
-	* Add the configuration lines from above in your /etc/defcon.conf
+* Download defcon source package
+* Unpack defcon source package
+* Go to defcon folder and type "phpize && ./configure && make && make install"
+* Make sure you have extension=defcon.so in your php.ini
+* Add the configuration lines from above in your /etc/defcon.conf
 
