@@ -41,6 +41,11 @@ You could also include an entire directory like this:
 
 	defcon.config-file = "/etc/defcon.conf.d"
 
+When including a directory - via INI entry or require/include statement,
+all entries within that directory which end in .conf, will be considered.
+If the entry is a file, it is read like any other configuration file.
+If the entry is itself a directory, that directory is recursively
+included.
 
 Installation
 ============
