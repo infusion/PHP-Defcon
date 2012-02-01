@@ -274,7 +274,89 @@ static int parse_constantname(
 	return i;
 }
 
-// returns the total new valid length of the string in V[]
+// Parse a quoted string value. The leading quote character has already
+// been skipped over. Its character value, is given in the 'quote' argument.
+//
+// The parsed string content is placed into V starting at V[Vlen], appending
+// to an accumulating value in a '.' concatenation sequence.
+//
+// Returns the total new valid length of the string in V[], or -1 on error.
+static int parse_value_quoted(
+	struct defcon_context *ctx,
+	char **sp,
+	char *V,			// OUT: will fill V[Vlen] ff.
+	int Vlen,			// length so far
+	char *kind,
+	int quote
+) {
+	int i;
+	int extraline = 0;
+
+	for (i = Vlen; **sp && **sp != quote; (*sp)++, i++) {
+		if (i > VALUELEN) {
+			PR_ERR(ctx, "%s too long", kind);
+			return -1;
+		}
+		V[i] = **sp;
+		if (**sp == '\n')
+			extraline++;
+	}
+	V[i] = '\0';
+	if (!**sp) {
+		PR_ERR(ctx, "Unterminated quoted string");
+		return -1;
+	}
+	(*sp)++;
+	ctx->line += extraline;
+	return i;
+}
+
+// Parse an unquoted string value, stopping at whitespace, or at '.' when
+// concatenation is permitted, or at separator characters (',' or ';').
+//
+// If the new unquoted string value happens to be an already defined
+// constant, the value of that constant (as a string), is used instead
+// of the constant name.
+//
+// The parsed string content is placed into V starting at V[Vlen], appending
+// to an accumulating value in a '.' concatenation sequence.
+//
+// Returns the total new valid length of the string in V[], or -1 on error.
+static int parse_value_unquoted(
+	struct defcon_context *ctx,
+	char **sp,
+	char *V,			// OUT: will fill V[Vlen] ff.
+	int Vlen,			// length so far
+	char *kind,
+	int may_concat
+) {
+	int i;
+	int extraline = 0;
+
+	for (i = Vlen; **sp && !SEP(**sp) && !WS(**sp); (*sp)++, i++) {
+		if (may_concat && **sp == '.')
+			break;
+		if (i > VALUELEN) {
+			PR_ERR(ctx, "%s too long", kind);
+			return -1;
+		}
+		V[i] = **sp;
+	}
+	V[i] = '\0';
+	if (i == 0) {
+		PR_ERR(ctx, "No %s found at '%c'", kind, **sp);
+		return -1;
+	}
+	return replace_constant(ctx, V, Vlen, i-Vlen);
+}
+
+// Parse a value, either quoted or unquoted, by fanning out work
+// to parse_value_quoted() or parse_value_unquoted().
+//
+// The parsed string content is placed into V starting at V[Vlen], appending
+// to an accumulating value in a '.' concatenation sequence.
+//
+// Returns the total new valid length of the string in V[], or -1 on error
 static int parse_value(
 	struct defcon_context *ctx,
 	enum defcon_keyword_id KW,
@@ -283,42 +365,12 @@ static int parse_value(
 	int Vlen,			// length so far
 	char *kind
 ) {
-	int i, quote = (**sp == '"' || **sp == '\'') ? *((*sp)++) : '\0';
-	int extraline = 0;
-	int may_concat = !quote && keywords[KW].may_concat;
+	int quote = (**sp == '"' || **sp == '\'') ? *((*sp)++) : '\0';
 
-	for (i = Vlen;
-	    (quote && **sp && **sp != quote)
-	    || (!quote && **sp && !SEP(**sp) && !WS(**sp));
-	    (*sp)++, i++) {
-		if (may_concat && **sp == '.')
-			break;
-		if (i > VALUELEN) {
-			PR_ERR(ctx, "%s too long", kind);
-			return -1;
-		}
-		V[i] = **sp;
-		if (quote && **sp == '\n')
-			extraline++;
-	}
-
-	V[i] = '\0';
-
-	if (quote) {
-		if (!**sp) {
-			PR_ERR(ctx, "Unterminated quoted string");
-			return -1;
-		}
-		(*sp)++;
-		ctx->line += extraline;
-	} else {
-		if (i == 0) {
-			PR_ERR(ctx, "No %s found at '%c'", kind, **sp);
-			return -1;
-		}
-		i = replace_constant(ctx, V, Vlen, i-Vlen);
-	}
-	return i;
+	if (quote)
+		return parse_value_quoted(ctx, sp, V, Vlen, kind, quote);
+	return parse_value_unquoted(ctx, sp, V, Vlen, kind,
+					keywords[KW].may_concat);
 }
 
 static int config_read(
