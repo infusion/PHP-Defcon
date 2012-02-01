@@ -224,8 +224,10 @@ static int replace_constant(
 		if (newlen <= VALUELEN) {
 			PR_DBG(ctx, "replace_constant('%.*s') => %d '%.*s'\n", Nlen, V+Vlen, newlen, Z_STRLEN_PP(&Z), Z_STRVAL_PP(&Z));
 			memcpy(V+Vlen, Z_STRVAL_PP(&Z), Z_STRLEN_PP(&Z)+1);
+			zval_ptr_dtor(&Z);
 			return newlen;
 		}
+		zval_ptr_dtor(&Z);
 		PR_DBG(ctx, "replace_constant('%.*s') => %d TOO LONG\n", Nlen, V+Vlen, Vlen+Nlen);
 	} else {
 		PR_DBG(ctx, "replace_constant('%.*s') => %d NOT FOUND\n", Nlen, V+Vlen, Vlen+Nlen);
