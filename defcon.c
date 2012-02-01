@@ -488,6 +488,13 @@ require_term:			TRANSIT(ST_KEYWORD, " semicolon");
 	return 1;
 }
 
+static inline int read_dir_order(
+	const void *a,
+	const void *b
+) {
+	return strcmp((const char *) a, (const char *) b);
+}
+
 static int config_read_dir(
 	struct defcon_context *ctx,
 	enum defcon_keyword_id KW
@@ -496,6 +503,8 @@ TSRMLS_DC) {
 	DIR *dir = opendir(ctx->file);
 	int len, res;
 	struct defcon_context Nctx[1];
+	char **work;
+	int i, n_work;
 
 	if (!dir)
 		goto error;
@@ -505,22 +514,41 @@ TSRMLS_DC) {
 	de = emalloc(offsetof(struct dirent, d_name)
 		     + pathconf(ctx->file, _PC_NAME_MAX)
 		     + 1);
-	res = 1;
-	while (res && 0 == readdir_r(dir, de, &dep)) {
+	n_work = 0;
+	work = emalloc(sizeof(*work));
+	// pass 1 - read directory and remember all files matching .conf
+	while (0 == readdir_r(dir, de, &dep)) {
 		if (!dep)
 			break;
 		len = strlen(de->d_name);
 		if (len < 6 || 0 != strcmp(".conf", de->d_name + len - 5))
 			continue;
-		Nctx->module_number = ctx->module_number;
-		Nctx->file = emalloc(strlen(ctx->file) + 1 + len + 1);
-		Nctx->line = 1;
-		sprintf(Nctx->file, "%s/%s", ctx->file, de->d_name);
-		if (!config_read(Nctx, KW TSRMLS_CC) && KW == KW_REQUIRE)
-			res = 0;
-		efree(Nctx->file);
+		PR_DBG(ctx, "read_dir [%d] '%s'\n", n_work, de->d_name);
+		work[n_work++] = estrdup(de->d_name);
+		work = erealloc(work, (n_work+1) * sizeof(*work));
 	}
 	efree(de);
+	PR_DBG(ctx, "read_dir found %d files\n", n_work);
+	// pass 2 - sort names and then use them
+	qsort(work, n_work, sizeof(*work), read_dir_order);
+	for (res = 1, i = 0; i < n_work; i++) {
+		if (res) {
+			PR_DBG(ctx, "read_dir [%d] use '%s'\n", i, work[i]);
+			Nctx->module_number = ctx->module_number;
+			len = strlen(work[i]);
+			Nctx->file = emalloc(strlen(ctx->file) + 1 + len + 1);
+			Nctx->line = 1;
+			sprintf(Nctx->file, "%s/%s", ctx->file, work[i]);
+			if (	!config_read(Nctx, KW TSRMLS_CC)
+			     && KW == KW_REQUIRE)
+				res = 0;
+			efree(Nctx->file);
+		} else {
+			PR_DBG(ctx, "read_dir [%d] skip '%s'\n", i, work[i]);
+		}
+		efree(work[i]);
+	}
+	efree(work);
 	return res;
 
 error:
