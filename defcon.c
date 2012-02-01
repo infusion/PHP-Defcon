@@ -419,6 +419,8 @@ TSRMLS_DC) {
 				s++;
 				break;
 			} else if (*s == ';') {
+// NOTE: we can enter here from the top of the loop, with *s == '\n',
+// or from down below, with *s == '\0'.
 const_term:			TRANSIT(ST_KEYWORD, " semicolon");
 			} else {
 				PR_ERR(ctx, "Invalid '%c'", *s);
@@ -429,7 +431,7 @@ const_term:			TRANSIT(ST_KEYWORD, " semicolon");
 			Vlen = 0;
 			if (*s == '\n')
 				ctx->line++;
-			if (*s)
+			if (*s != '\0')
 				s++;
 			break;
 		   case ST_REQUIRE_PATH: // include/require pathname
@@ -446,6 +448,8 @@ const_term:			TRANSIT(ST_KEYWORD, " semicolon");
 				s++;
 				break;
 			} else if (*s == ';') {
+// NOTE: we can enter here from the top of the loop, with *s == '\n',
+// or from down below, with *s == '\0'.
 require_term:			TRANSIT(ST_KEYWORD, " semicolon");
 			} else {
 				PR_ERR(ctx, "Invalid '%c'", *s);
@@ -461,7 +465,7 @@ require_term:			TRANSIT(ST_KEYWORD, " semicolon");
 			Vlen = 0;
 			if (*s == '\n')
 				ctx->line++;
-			if (*s)
+			if (*s != '\0')
 				s++;
 			break;
 		}
