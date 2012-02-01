@@ -274,8 +274,43 @@ static int parse_constantname(
 	return i;
 }
 
+// given a single character in c, either return -1 if it is not a
+// valid octal digit (0-7), or return its numeric value.
+static int oct_digit(int c)
+{
+	if (c >= '0' && c <= '7')
+		return c - '0';
+	return -1;
+}
+
+// given a single character in c, either return -1 if it is not a
+// valid hexadecimal digit (0-7a-fA-F), or return its numeric value.
+static int hex_digit(int c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a';
+	if (c >= 'A' && c <= 'F')
+		return c - 'A';
+	return -1;
+}
+
 // Parse a quoted string value. The leading quote character has already
 // been skipped over. Its character value, is given in the 'quote' argument.
+//
+// Quoted strings continue until the matching closing quote character
+// is found, even over newlines, which result in the newline being
+// included in the string content.
+//
+// Within the quoted string, a backslash is interpreted specially,
+// following the usual PHP conventions: a '\' followed by the
+// active quote character, results in the quote character being
+// put into the target string. A double backslash must be used to
+// include the backslash itself into the target string. Only for
+// double quoted strings, the usual additional escape sequences,
+// like '\n', will be interpreted.  NOTE: we make no attempt to
+// support '$', i.e. variable substitution, within double quoted strings.
 //
 // The parsed string content is placed into V starting at V[Vlen], appending
 // to an accumulating value in a '.' concatenation sequence.
@@ -289,7 +324,7 @@ static int parse_value_quoted(
 	char *kind,
 	int quote
 ) {
-	int i;
+	int i, j;
 	int extraline = 0;
 
 	for (i = Vlen; **sp && **sp != quote; (*sp)++, i++) {
@@ -297,13 +332,58 @@ static int parse_value_quoted(
 			PR_ERR(ctx, "%s too long", kind);
 			return -1;
 		}
-		V[i] = **sp;
-		if (**sp == '\n')
-			extraline++;
+		if (**sp != '\\') {
+			if ('\n' == (V[i] = **sp))
+				extraline++;
+			continue;
+		}
+		// interpret the next character for a backslash escape
+		if ((*sp)[1] == '\0')
+			goto unterminated;
+		static char *sqspecial = "\\\\''";
+		static char *dqspecial = "n\nr\rt\tv\vf\f\\\\\"\"";
+		char *special = (quote == '"') ? dqspecial : sqspecial;
+		for (j = 0; special[j]; j += 2)
+			if ((*sp)[1] == special[j]) {
+				V[i] = special[j+1];
+				(*sp)++;
+				goto continue_outer;
+			}
+		if (quote == '"') {
+			int digit, literal = 0;
+			if (-1 < (digit = oct_digit((*sp)[1]))) {
+				// an octal literal
+				literal = digit;
+				(*sp)++;
+				for (j = 0; j < 2; j++) {
+					if (0 > (digit = oct_digit((*sp)[1])))
+						break;
+					literal = 8 * literal + digit;
+					(*sp)++;
+				}
+				V[i] = literal;
+				goto continue_outer;
+			}
+			if (	(*sp)[1] == 'x'
+			     && -1 < (digit = hex_digit((*sp)[2]))) {
+				// an hexadecimal literal
+				literal = digit;
+				(*sp) += 2;
+				if (-1 < (digit = hex_digit((*sp)[1]))) {
+					literal = 16 * literal + digit;
+					(*sp)++;
+				}
+				V[i] = literal;
+				goto continue_outer;
+			}
+		}
+		// none of the specially interpreted characters - keep the '\'
+		V[i] = '\\';
+		continue_outer: ;
 	}
 	V[i] = '\0';
 	if (!**sp) {
-		PR_ERR(ctx, "Unterminated quoted string");
+unterminated:	PR_ERR(ctx, "Unterminated quoted string");
 		return -1;
 	}
 	(*sp)++;
