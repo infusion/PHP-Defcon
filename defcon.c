@@ -196,7 +196,7 @@ TSRMLS_DC) {
 	if (zend_register_constant(&zc TSRMLS_CC) == FAILURE)
 		PR_ERR(ctx, "Constant '%s' redefined", N);
 
-	PR_DBG(ctx, "define('%s', '%.*s')\n", N, Vlen, V);
+	PR_DBG(ctx, "DONE: define('%s', '%.*s')\n", N, Vlen, V);
 	return 1;
 }
 
@@ -214,23 +214,17 @@ static int replace_constant(
 	zval *Z;
 	int newlen;
 
-	PR_DBG(ctx, "replace_constant('%.*s') Vlen=%d\n", Nlen, V+Vlen, Vlen);
-	if (zend_hash_find(EG(zend_constants), V+Vlen, Nlen+1, (void **)&Z) == SUCCESS) {
-		PR_DBG(ctx, "replace_constant('%.*s') Vlen=%d FOUND type %d @0x%p\n", Nlen, V+Vlen, Vlen, Z->type, Z);
+	if (zend_hash_find(EG(zend_constants), V+Vlen, Nlen+1, (void **)&Z)
+		== SUCCESS) {
 		SEPARATE_ZVAL(&Z);
 		convert_to_string_ex(&Z);
-		PR_DBG(ctx, "replace_constant('%.*s') Vlen=%d CONVERTED type %d => %d '%.*s'\n", Nlen, V+Vlen, Vlen, Z->type, Z_STRLEN_PP(&Z), Z_STRLEN_PP(&Z), Z_STRVAL_PP(&Z));
 		newlen = Vlen + Z_STRLEN_PP(&Z);
 		if (newlen <= VALUELEN) {
-			PR_DBG(ctx, "replace_constant('%.*s') => %d '%.*s'\n", Nlen, V+Vlen, newlen, Z_STRLEN_PP(&Z), Z_STRVAL_PP(&Z));
 			memcpy(V+Vlen, Z_STRVAL_PP(&Z), Z_STRLEN_PP(&Z)+1);
 			zval_ptr_dtor(&Z);
 			return newlen;
 		}
 		zval_ptr_dtor(&Z);
-		PR_DBG(ctx, "replace_constant('%.*s') => %d TOO LONG\n", Nlen, V+Vlen, Vlen+Nlen);
-	} else {
-		PR_DBG(ctx, "replace_constant('%.*s') => %d NOT FOUND\n", Nlen, V+Vlen, Vlen+Nlen);
 	}
 	return Vlen+Nlen;
 }
@@ -293,8 +287,6 @@ static int parse_value(
 	int extraline = 0;
 	int may_concat = !quote && keywords[KW].may_concat;
 
-	PR_DBG(ctx, "parse_value<%s> Vlen=%d quote=%s may_concat=%s nextchar=0x%02x '%c'\n", kind, Vlen, quote ? "true" : "false", may_concat ? "true" : "false", **sp, **sp);
-
 	for (i = Vlen;
 	    (quote && **sp && **sp != quote)
 	    || (!quote && **sp && !SEP(**sp) && !WS(**sp));
@@ -326,7 +318,6 @@ static int parse_value(
 		}
 		i = replace_constant(ctx, V, Vlen, i-Vlen);
 	}
-	PR_DBG(ctx, "parse_value => %d '%.*s'\n", i, i, V);
 	return i;
 }
 
@@ -526,17 +517,14 @@ TSRMLS_DC) {
 		len = strlen(de->d_name);
 		if (len < 6 || 0 != strcmp(".conf", de->d_name + len - 5))
 			continue;
-		PR_DBG(ctx, "read_dir [%d] '%s'\n", n_work, de->d_name);
 		work[n_work++] = estrdup(de->d_name);
 		work = erealloc(work, (n_work+1) * sizeof(*work));
 	}
 	efree(de);
-	PR_DBG(ctx, "read_dir found %d files\n", n_work);
 	// pass 2 - sort names and then use them
 	qsort(work, n_work, sizeof(*work), read_dir_order);
 	for (res = 1, i = 0; i < n_work; i++) {
 		if (res) {
-			PR_DBG(ctx, "read_dir [%d] use '%s'\n", i, work[i]);
 			Nctx->module_number = ctx->module_number;
 			len = strlen(work[i]);
 			Nctx->file = emalloc(strlen(ctx->file) + 1 + len + 1);
@@ -546,8 +534,6 @@ TSRMLS_DC) {
 			     && KW == KW_REQUIRE)
 				res = 0;
 			efree(Nctx->file);
-		} else {
-			PR_DBG(ctx, "read_dir [%d] skip '%s'\n", i, work[i]);
 		}
 		efree(work[i]);
 	}
