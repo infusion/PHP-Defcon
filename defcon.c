@@ -321,6 +321,11 @@ static int parse_value(
 			PR_ERR(ctx, "No %s found at '%c'", kind, **sp);
 			return -1;
 		}
+		// the following if-conditional should go in the final
+		// version, to enable constant replacement for numeric
+		// and boolean values, too. But that's broken now,
+		// and with this condition at least the old test cases
+		// may continue to PASS.
 		if (may_concat)
 			i = replace_constant(ctx, V, Vlen, i-Vlen);
 	}
