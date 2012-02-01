@@ -205,7 +205,7 @@ TSRMLS_DC) {
 // replace the string in V[Vlen...Vlen+Nlen] with that constant's value.
 // Returns the new overall length of the string in V[], whether replacement
 // was done, or not.
-int replace_constant(
+static int replace_constant(
 	struct defcon_context *ctx,
 	char *V,
 	int Vlen,
@@ -216,9 +216,10 @@ int replace_constant(
 
 	PR_DBG(ctx, "replace_constant('%.*s') Vlen=%d\n", Nlen, V+Vlen, Vlen);
 	if (zend_hash_find(EG(zend_constants), V+Vlen, Nlen+1, (void **)&Z) == SUCCESS) {
-		PR_DBG(ctx, "replace_constant('%.*s') Vlen=%d FOUND 0x%p\n", Nlen, V+Vlen, Vlen, Z);
+		PR_DBG(ctx, "replace_constant('%.*s') Vlen=%d FOUND type %d @0x%p\n", Nlen, V+Vlen, Vlen, Z->type, Z);
+		SEPARATE_ZVAL(&Z);
 		convert_to_string_ex(&Z);
-		PR_DBG(ctx, "replace_constant('%.*s') Vlen=%d CONVERTED => %d '%.*s'\n", Nlen, V+Vlen, Vlen, Z_STRLEN_PP(&Z), Z_STRLEN_PP(&Z), Z_STRVAL_PP(&Z));
+		PR_DBG(ctx, "replace_constant('%.*s') Vlen=%d CONVERTED type %d => %d '%.*s'\n", Nlen, V+Vlen, Vlen, Z->type, Z_STRLEN_PP(&Z), Z_STRLEN_PP(&Z), Z_STRVAL_PP(&Z));
 		newlen = Vlen + Z_STRLEN_PP(&Z);
 		if (newlen <= VALUELEN) {
 			PR_DBG(ctx, "replace_constant('%.*s') => %d '%.*s'\n", Nlen, V+Vlen, newlen, Z_STRLEN_PP(&Z), Z_STRVAL_PP(&Z));
