@@ -33,19 +33,47 @@ A Better alternative would be using Defcon. An Example config file could look li
 
 	require '/var/admin/defcon.global.conf'
 
-Just add this line to your php.ini file:
+Config File Reading
+-------------------
 
-	defcon.config-file = "/etc/defcon.conf"
+The *require* and *include* keywords can be used to include an additional
+file from a given config file. 'include' ignores errors, while 'require'
+stops the defcon configuration process on error. *NOTE* put single or double
+quotes around the pathnames, unless they do not contain a dot '.' character.
 
-You could also include an entire directory like this:
+To change the config file from the default */etc/defcon.conf*, add to php.ini:
 
-	defcon.config-file = "/etc/defcon.conf.d"
+	defcon.config-file = "/some/where/else.conf"
 
-When including a directory - via INI entry or require/include statement,
-all entries within that directory which end in .conf, will be considered.
-If the entry is a file, it is read like any other configuration file.
-If the entry is itself a directory, that directory is recursively
-included.
+If the config file given, either in php.ini or in a require/include
+statement, really happens to be a *directory*, all files from that
+directory with names ending in *.conf* will be read, in sorted order.
+If any of these names is again a directory, that other directory
+will be read, recursively.
+
+Constant Value Syntax
+---------------------
+
+You can write the constant values, after the '=' sign, either surrounded
+by single or double quotes, or without any quotes.
+
+If you write values without any quotes, the value will end as soon as some
+syntactically relevant character is encountered, like whitespace, newline,
+comma, semicolon, and sometimes a dot. **Furthermore** if such an unquoted
+value happens to be the name of an *already defined constant*, the *value*
+of that constant is substituted in its place.
+
+Single and double quoted strings work like you are used to from PHP,
+including backslash escaping within the strings.
+
+For *string* constants, as well as the pathes of *require* / *include*
+statements, you can additionally use the dot '.' character to concatenate
+multiple strings together. This is especially useful together with the
+aforementioned replacement of *unquoted* values that happen to be known
+constants, like in the following example:
+
+	string PREFIX = "/usr/local"
+	string BIN = PREFIX . "/bin"
 
 Installation
 ============
