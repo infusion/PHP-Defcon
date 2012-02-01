@@ -211,18 +211,18 @@ int replace_constant(
 	int Vlen,
 	int Nlen
 ) {
-	zval **Z;
+	zval *Z;
 	int newlen;
 
 	PR_DBG(ctx, "replace_constant('%.*s') Vlen=%d\n", Nlen, V+Vlen, Vlen);
 	if (zend_hash_find(EG(zend_constants), V+Vlen, Nlen+1, (void **)&Z) == SUCCESS) {
 		PR_DBG(ctx, "replace_constant('%.*s') Vlen=%d FOUND 0x%p\n", Nlen, V+Vlen, Vlen, Z);
-		convert_to_string_ex(Z);
-		PR_DBG(ctx, "replace_constant('%.*s') Vlen=%d CONVERTED => %d '%.*s'\n", Nlen, V+Vlen, Vlen, Z_STRLEN_PP(Z), Z_STRLEN_PP(Z), Z_STRVAL_PP(Z));
-		newlen = Vlen + Z_STRLEN_PP(Z);
+		convert_to_string_ex(&Z);
+		PR_DBG(ctx, "replace_constant('%.*s') Vlen=%d CONVERTED => %d '%.*s'\n", Nlen, V+Vlen, Vlen, Z_STRLEN_PP(&Z), Z_STRLEN_PP(&Z), Z_STRVAL_PP(&Z));
+		newlen = Vlen + Z_STRLEN_PP(&Z);
 		if (newlen <= VALUELEN) {
-			PR_DBG(ctx, "replace_constant('%.*s') => %d '%.*s'\n", Nlen, V+Vlen, newlen, Z_STRLEN_PP(Z), Z_STRVAL_PP(Z));
-			memcpy(V+Vlen, Z_STRVAL_PP(Z), Z_STRLEN_PP(Z)+1);
+			PR_DBG(ctx, "replace_constant('%.*s') => %d '%.*s'\n", Nlen, V+Vlen, newlen, Z_STRLEN_PP(&Z), Z_STRVAL_PP(&Z));
+			memcpy(V+Vlen, Z_STRVAL_PP(&Z), Z_STRLEN_PP(&Z)+1);
 			return newlen;
 		}
 		PR_DBG(ctx, "replace_constant('%.*s') => %d TOO LONG\n", Nlen, V+Vlen, Vlen+Nlen);
@@ -321,13 +321,7 @@ static int parse_value(
 			PR_ERR(ctx, "No %s found at '%c'", kind, **sp);
 			return -1;
 		}
-		// the following if-conditional should go in the final
-		// version, to enable constant replacement for numeric
-		// and boolean values, too. But that's broken now,
-		// and with this condition at least the old test cases
-		// may continue to PASS.
-		if (may_concat)
-			i = replace_constant(ctx, V, Vlen, i-Vlen);
+		i = replace_constant(ctx, V, Vlen, i-Vlen);
 	}
 	PR_DBG(ctx, "parse_value => %d '%.*s'\n", i, i, V);
 	return i;
