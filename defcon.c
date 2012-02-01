@@ -361,6 +361,10 @@ static int parse_value_quoted(
 					literal = 8 * literal + digit;
 					(*sp)++;
 				}
+				if (literal == 0) {
+					PR_ERR(ctx, "no '\\0' allowed");
+					return -1;
+				}
 				V[i] = literal;
 				goto continue_outer;
 			}
@@ -372,6 +376,10 @@ static int parse_value_quoted(
 				if (-1 < (digit = hex_digit((*sp)[1]))) {
 					literal = 16 * literal + digit;
 					(*sp)++;
+				}
+				if (literal == 0) {
+					PR_ERR(ctx, "no '\\x0' allowed");
+					return -1;
 				}
 				V[i] = literal;
 				goto continue_outer;
