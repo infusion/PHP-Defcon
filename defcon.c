@@ -355,18 +355,18 @@ static int parse_value_quoted(
 				// an octal literal
 				literal = digit;
 				(*sp)++;
+				if (literal == 0) { // special case \0
+					V[i] = 0;
+					continue;
+				}
 				for (j = 0; j < 2; j++) {
 					if (0 > (digit = oct_digit((*sp)[1])))
 						break;
 					literal = 8 * literal + digit;
 					(*sp)++;
 				}
-				if (literal == 0) {
-					PR_ERR(ctx, "no '\\0' allowed");
-					return -1;
-				}
 				V[i] = literal;
-				goto continue_outer;
+				continue;
 			}
 			if (	(*sp)[1] == 'x'
 			     && -1 < (digit = hex_digit((*sp)[2]))) {
@@ -377,12 +377,8 @@ static int parse_value_quoted(
 					literal = 16 * literal + digit;
 					(*sp)++;
 				}
-				if (literal == 0) {
-					PR_ERR(ctx, "no '\\x0' allowed");
-					return -1;
-				}
 				V[i] = literal;
-				goto continue_outer;
+				continue;
 			}
 		}
 		// none of the specially interpreted characters - keep the '\'
