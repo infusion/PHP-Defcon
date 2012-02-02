@@ -2,6 +2,7 @@
 Fail unknown keyword
 --INI--
 defcon.config-file = tests/parser_error02.conf
+error_log = /dev/null
 --FILE--
 <?php
 echo "OK\n";

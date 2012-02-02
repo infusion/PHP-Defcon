@@ -2,6 +2,7 @@
 See that require of missing file fails
 --INI--
 defcon.config-file = tests/require_error01.conf
+error_log = /dev/null
 --FILE--
 <?php
 echo DEFCON_GOOD_STRING . "\n";

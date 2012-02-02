@@ -80,7 +80,13 @@ Installation
 
 * Download defcon source package
 * Unpack defcon source package
-* Go to defcon folder and type "phpize && ./configure && make && make install"
-* Make sure you have extension=defcon.so in your php.ini
-* Add the configuration lines from above in your /etc/defcon.conf
+* Go to defcon folder and type "phpize && ./configure && make"
+* Maybe run the included test cases:
+	make test PHP_EXECUTABLE=/usr/bin/php5 TEST_PHP_ARGS="-q"
+* If all is well, run "make install", as root, to copy modules/defcon.so
+  to your PHP extension directory.
+* Make sure you have extension=defcon.so in your php.ini, or in a file
+  like /etc/php5/conf.d/defcon.ini
+* Add configuration to your /etc/defcon.conf, or to whatever file
+  you configured using the defcon.config-file= php.ini setting.
 

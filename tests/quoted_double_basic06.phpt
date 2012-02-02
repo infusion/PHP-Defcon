@@ -2,6 +2,7 @@
 double quoted string nul characters
 --INI--
 defcon.config-file = tests/quoted_double_basic06.conf
+error_log = /dev/null
 --FILE--
 <?php
 echo DEFCON_STRING_1 . "\n";
