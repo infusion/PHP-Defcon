@@ -18,7 +18,7 @@
 #ifndef PHP_DEFCON_H
 #define PHP_DEFCON_H
 
-#define PHP_DEFCON_VERSION "1.0"
+#define PHP_DEFCON_VERSION "1.2"
 #define PHP_DEFCON_EXTNAME "defcon"
 
 #define KEYWORDLEN 64
