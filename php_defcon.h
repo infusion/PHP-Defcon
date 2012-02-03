@@ -18,12 +18,12 @@
 #ifndef PHP_DEFCON_H
 #define PHP_DEFCON_H
 
-#define PHP_DEFCON_VERSION "1.0"
+#define PHP_DEFCON_VERSION "1.2"
 #define PHP_DEFCON_EXTNAME "defcon"
 
 #define KEYWORDLEN 64
 #define NAMELEN 64
-#define VALUELEN 128
+#define VALUELEN 4096
 
 extern zend_module_entry defcon_module_entry;
 #define phpext_defcon_ptr &defcon_module_entry

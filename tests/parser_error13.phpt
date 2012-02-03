@@ -2,6 +2,7 @@
 Check multiline quoted string line count
 --INI--
 defcon.config-file = tests/parser_error13.conf
+error_log = /dev/null
 --FILE--
 <?php
 echo "OK\n";

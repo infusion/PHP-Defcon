@@ -2,6 +2,7 @@
 Fail overly long constant name
 --INI--
 defcon.config-file = tests/parser_error04.conf
+error_log = /dev/null
 --FILE--
 <?php
 echo "OK\n";

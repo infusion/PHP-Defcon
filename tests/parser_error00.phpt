@@ -2,6 +2,7 @@
 Handle missing configuration file
 --INI--
 defcon.config-file = tests/parser_error00.conf
+error_log = /dev/null
 --FILE--
 <?php
 echo "OK\n";
