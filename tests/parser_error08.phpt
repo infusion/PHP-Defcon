@@ -2,6 +2,7 @@
 Fail overly long value
 --INI--
 defcon.config-file = tests/parser_error08.conf
+error_log = /dev/null
 --FILE--
 <?php
 echo "OK\n";

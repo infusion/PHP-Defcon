@@ -97,21 +97,22 @@ enum defcon_keyword_id {
 struct defcon_keyword {
 	char *name;
 	int state;	// state to switch to when found
+	int may_concat;	// may the value be build using '.' concatenation?
 };
 
 static struct defcon_keyword keywords[] = {
-[KW_STRING] =	{ "string",	ST_CONST_NAME },
-[KW_INT] =	{ "int",	ST_CONST_NAME },
-[KW_LONG] =	{ "long",	ST_CONST_NAME },
-[KW_FLOAT] =	{ "float",	ST_CONST_NAME },
-[KW_REAL] =	{ "real",	ST_CONST_NAME },
-[KW_DOUBLE] =	{ "double",	ST_CONST_NAME },
-[KW_BOOL] =	{ "bool",	ST_CONST_NAME },
-[KW_BOOLEAN] =	{ "boolean",	ST_CONST_NAME },
-[KW_LOGICAL] =	{ "logical",	ST_CONST_NAME },
-[KW_SHORT] =	{ "short",	ST_CONST_NAME },
-[KW_REQUIRE] =	{ "require",	ST_REQUIRE_PATH },
-[KW_INCLUDE] =	{ "include",	ST_REQUIRE_PATH },
+[KW_STRING] =	{ "string",	ST_CONST_NAME,		1 },
+[KW_INT] =	{ "int",	ST_CONST_NAME,		0 },
+[KW_LONG] =	{ "long",	ST_CONST_NAME,		0 },
+[KW_FLOAT] =	{ "float",	ST_CONST_NAME,		0 },
+[KW_REAL] =	{ "real",	ST_CONST_NAME,		0 },
+[KW_DOUBLE] =	{ "double",	ST_CONST_NAME,		0 },
+[KW_BOOL] =	{ "bool",	ST_CONST_NAME,		0 },
+[KW_BOOLEAN] =	{ "boolean",	ST_CONST_NAME,		0 },
+[KW_LOGICAL] =	{ "logical",	ST_CONST_NAME,		0 },
+[KW_SHORT] =	{ "short",	ST_CONST_NAME,		0 },
+[KW_REQUIRE] =	{ "require",	ST_REQUIRE_PATH,	1 },
+[KW_INCLUDE] =	{ "include",	ST_REQUIRE_PATH,	1 },
 };
 #define NR_KW (sizeof(keywords)/sizeof(keywords[0]))
 
@@ -151,15 +152,16 @@ static int add_constant(
 	struct defcon_context *ctx,
 	enum defcon_keyword_id KW,
 	char *N,
-	char *V
+	char *V,
+	int Vlen
 TSRMLS_DC) {
 	zend_constant zc;
 
 	switch (KW) {
 	   case KW_STRING:
 		zc.value.type = IS_STRING;
-		zc.value.value.str.val = zend_strndup(V, strlen(V));
-		zc.value.value.str.len = strlen(V);
+		zc.value.value.str.val = zend_strndup(V, Vlen);
+		zc.value.value.str.len = Vlen;
 		break;
 	   case KW_INT:
 	   case KW_LONG:
@@ -194,10 +196,41 @@ TSRMLS_DC) {
 	if (zend_register_constant(&zc TSRMLS_CC) == FAILURE)
 		PR_ERR(ctx, "Constant '%s' redefined", N);
 
+	PR_DBG(ctx, "DONE: define('%s', '%.*s')\n", N, Vlen, V);
 	return 1;
 }
 
+// given a string in V[Vlen+Nlen], use the substring starting at V[Vlen]
+// to look up an already defined constant, and if it is already defined,
+// replace the string in V[Vlen...Vlen+Nlen] with that constant's value.
+// Returns the new overall length of the string in V[], whether replacement
+// was done, or not.
+static int replace_constant(
+	struct defcon_context *ctx,
+	char *V,
+	int Vlen,
+	int Nlen
+) {
+	zval *Z;
+	int newlen;
+
+	if (zend_hash_find(EG(zend_constants), V+Vlen, Nlen+1, (void **)&Z)
+		== SUCCESS) {
+		SEPARATE_ZVAL(&Z);
+		convert_to_string_ex(&Z);
+		newlen = Vlen + Z_STRLEN_PP(&Z);
+		if (newlen <= VALUELEN) {
+			memcpy(V+Vlen, Z_STRVAL_PP(&Z), Z_STRLEN_PP(&Z)+1);
+			zval_ptr_dtor(&Z);
+			return newlen;
+		}
+		zval_ptr_dtor(&Z);
+	}
+	return Vlen+Nlen;
+}
+
 #define WS(C) (C == ' ' || C == '\n' || C == '\t' || C == '\r')
+#define SEP(C) (C == ',' || C == ';')
 #define ALPHA(C) ((C >= 'a' && C <= 'z') || (C >= 'A' && C <= 'Z'))
 #define ALNUM(C) (ALPHA(C) || (C >= '0' && C <= '9') || C == '_')
 
@@ -241,43 +274,187 @@ static int parse_constantname(
 	return i;
 }
 
-static int parse_value(
+// given a single character in c, either return -1 if it is not a
+// valid octal digit (0-7), or return its numeric value.
+static int oct_digit(int c)
+{
+	if (c >= '0' && c <= '7')
+		return c - '0';
+	return -1;
+}
+
+// given a single character in c, either return -1 if it is not a
+// valid hexadecimal digit (0-7a-fA-F), or return its numeric value.
+static int hex_digit(int c)
+{
+	if (c >= '0' && c <= '9')
+		return c - '0';
+	if (c >= 'a' && c <= 'f')
+		return c - 'a';
+	if (c >= 'A' && c <= 'F')
+		return c - 'A';
+	return -1;
+}
+
+// Parse a quoted string value. The leading quote character has already
+// been skipped over. Its character value, is given in the 'quote' argument.
+//
+// Quoted strings continue until the matching closing quote character
+// is found, even over newlines, which result in the newline being
+// included in the string content.
+//
+// Within the quoted string, a backslash is interpreted specially,
+// following the usual PHP conventions: a '\' followed by the
+// active quote character, results in the quote character being
+// put into the target string. A double backslash must be used to
+// include the backslash itself into the target string. Only for
+// double quoted strings, the usual additional escape sequences,
+// like '\n', will be interpreted.  NOTE: we make no attempt to
+// support '$', i.e. variable substitution, within double quoted strings.
+//
+// The parsed string content is placed into V starting at V[Vlen], appending
+// to an accumulating value in a '.' concatenation sequence.
+//
+// Returns the total new valid length of the string in V[], or -1 on error.
+static int parse_value_quoted(
 	struct defcon_context *ctx,
 	char **sp,
-	char *V,
-	char *kind
+	char *V,			// OUT: will fill V[Vlen] ff.
+	int Vlen,			// length so far
+	char *kind,
+	int quote
 ) {
-	int i, quote = (**sp == '"' || **sp == '\'') ? *((*sp)++) : '\0';
+	int i, j;
 	int extraline = 0;
 
-	for (i = 0;
-	    (quote && **sp && **sp != quote)
-	    || (!quote && **sp && **sp != ',' && **sp != ';' && !WS(**sp));
-	    (*sp)++, i++) {
+	for (i = Vlen; **sp && **sp != quote; (*sp)++, i++) {
 		if (i > VALUELEN) {
 			PR_ERR(ctx, "%s too long", kind);
-			return 0;
+			return -1;
+		}
+		if (**sp != '\\') {
+			if ('\n' == (V[i] = **sp))
+				extraline++;
+			continue;
+		}
+		// interpret the next character for a backslash escape
+		if ((*sp)[1] == '\0')
+			goto unterminated;
+		static char *sqspecial = "\\\\''";
+		static char *dqspecial = "n\nr\rt\tv\vf\f\\\\\"\"";
+		char *special = (quote == '"') ? dqspecial : sqspecial;
+		for (j = 0; special[j]; j += 2)
+			if ((*sp)[1] == special[j]) {
+				V[i] = special[j+1];
+				(*sp)++;
+				goto continue_outer;
+			}
+		if (quote == '"') {
+			int digit, literal = 0;
+			if (-1 < (digit = oct_digit((*sp)[1]))) {
+				// an octal literal
+				literal = digit;
+				(*sp)++;
+				if (literal == 0) { // special case \0
+					V[i] = 0;
+					continue;
+				}
+				for (j = 0; j < 2; j++) {
+					if (0 > (digit = oct_digit((*sp)[1])))
+						break;
+					literal = 8 * literal + digit;
+					(*sp)++;
+				}
+				V[i] = literal;
+				continue;
+			}
+			if (	(*sp)[1] == 'x'
+			     && -1 < (digit = hex_digit((*sp)[2]))) {
+				// an hexadecimal literal
+				literal = digit;
+				(*sp) += 2;
+				if (-1 < (digit = hex_digit((*sp)[1]))) {
+					literal = 16 * literal + digit;
+					(*sp)++;
+				}
+				V[i] = literal;
+				continue;
+			}
+		}
+		// none of the specially interpreted characters - keep the '\'
+		V[i] = '\\';
+		continue_outer: ;
+	}
+	V[i] = '\0';
+	if (!**sp) {
+unterminated:	PR_ERR(ctx, "Unterminated quoted string");
+		return -1;
+	}
+	(*sp)++;
+	ctx->line += extraline;
+	return i;
+}
+
+// Parse an unquoted string value, stopping at whitespace, or at '.' when
+// concatenation is permitted, or at separator characters (',' or ';').
+//
+// If the new unquoted string value happens to be an already defined
+// constant, the value of that constant (as a string), is used instead
+// of the constant name.
+//
+// The parsed string content is placed into V starting at V[Vlen], appending
+// to an accumulating value in a '.' concatenation sequence.
+//
+// Returns the total new valid length of the string in V[], or -1 on error.
+static int parse_value_unquoted(
+	struct defcon_context *ctx,
+	char **sp,
+	char *V,			// OUT: will fill V[Vlen] ff.
+	int Vlen,			// length so far
+	char *kind,
+	int may_concat
+) {
+	int i;
+	int extraline = 0;
+
+	for (i = Vlen; **sp && !SEP(**sp) && !WS(**sp); (*sp)++, i++) {
+		if (may_concat && **sp == '.')
+			break;
+		if (i > VALUELEN) {
+			PR_ERR(ctx, "%s too long", kind);
+			return -1;
 		}
 		V[i] = **sp;
-		if (quote && **sp == '\n')
-			extraline++;
 	}
-
 	V[i] = '\0';
-
-	if (quote) {
-		if (!**sp) {
-			PR_ERR(ctx, "Unterminated quoted string");
-			return 0;
-		}
-		(*sp)++;
-		ctx->line += extraline;
-	} else if (i == 0) {
+	if (i == 0) {
 		PR_ERR(ctx, "No %s found at '%c'", kind, **sp);
-		return 0;
+		return -1;
 	}
+	return replace_constant(ctx, V, Vlen, i-Vlen);
+}
 
-	return i;
+// Parse a value, either quoted or unquoted, by fanning out work
+// to parse_value_quoted() or parse_value_unquoted().
+//
+// The parsed string content is placed into V starting at V[Vlen], appending
+// to an accumulating value in a '.' concatenation sequence.
+//
+// Returns the total new valid length of the string in V[], or -1 on error
+static int parse_value(
+	struct defcon_context *ctx,
+	enum defcon_keyword_id KW,
+	char **sp,
+	char *V,			// OUT: will fill V[Vlen] ff.
+	int Vlen,			// length so far
+	char *kind
+) {
+	int quote = (**sp == '"' || **sp == '\'') ? *((*sp)++) : '\0';
+
+	if (quote)
+		return parse_value_quoted(ctx, sp, V, Vlen, kind, quote);
+	return parse_value_unquoted(ctx, sp, V, Vlen, kind,
+					keywords[KW].may_concat);
 }
 
 static int config_read(
@@ -290,6 +467,7 @@ static int config_parse(
 	char *s
 TSRMLS_DC) {
 	char kw[KEYWORDLEN + 1], N[NAMELEN + 1], V[VALUELEN + 1];
+	int Vlen;
 	int i, j;
 	char c, *ps;
 	enum defcon_keyword_id KW;
@@ -312,11 +490,11 @@ TSRMLS_DC) {
 
 		for (; WS(*s); s++, ps++) {
 			if(*s == '\n') {
-				if (	state == ST_CONST_TERM
-				     || state == ST_REQUIRE_TERM) {
-					// accept newline instead of ',' or ';'
-					TRANSIT(ST_KEYWORD, " at \\n");
-				}
+				// make newline work like ';'
+				if (state == ST_CONST_TERM)
+					goto const_term;
+				if (state == ST_REQUIRE_TERM)
+					goto require_term;
 				ctx->line++;
 			}
 		}
@@ -339,6 +517,7 @@ TSRMLS_DC) {
 				PR_ERR(ctx, "No valid keyword (%s)", kw);
 				return 0;
 			}
+			Vlen = 0;
 			TRANSIT(keywords[KW].state, " KW %.*s", i, kw);
 			break;
 		   case ST_CONST_NAME:
@@ -363,31 +542,55 @@ TSRMLS_DC) {
 			s++;
 			break;
 		   case ST_CONST_VALUE:
-			if (0 >= (i = parse_value(ctx, &s, V, "Value")))
+			Vlen = parse_value(ctx, KW, &s, V, Vlen, "Value");
+			if (0 > Vlen)
 				return 0;
-
-			if (!add_constant(ctx, KW, N, V TSRMLS_CC))
-				return 0;
-
-			TRANSIT(ST_CONST_TERM, " value '%.*s'", i, V);
+			TRANSIT(ST_CONST_TERM, " value '%.*s'", Vlen, V);
 			break;
 		   case ST_CONST_TERM:
 			if (*s == ',') {
 				TRANSIT(ST_CONST_NAME, " comma");
+			} else if (*s == '.') {
+				TRANSIT(ST_CONST_VALUE, " period");
 				s++;
 				break;
-			}
-			if (*s == ';') {
-				TRANSIT(ST_KEYWORD, " semicolon");
-				s++;
-				break;
-			}
-			PR_ERR(ctx, "Invalid '%c'", *s);
-			return 0;
-		   case ST_REQUIRE_PATH: // include/require pathname
-			if (0 >= (i = parse_value(ctx, &s, V, "Pathname")))
+			} else if (*s == ';') {
+// NOTE: we can enter here from the top of the loop, with *s == '\n',
+// or from down below, with *s == '\0'.
+const_term:			TRANSIT(ST_KEYWORD, " semicolon");
+			} else {
+				PR_ERR(ctx, "Invalid '%c'", *s);
 				return 0;
-
+			}
+			if (!add_constant(ctx, KW, N, V, Vlen TSRMLS_CC))
+				return 0;
+			Vlen = 0;
+			if (*s == '\n')
+				ctx->line++;
+			if (*s != '\0')
+				s++;
+			break;
+		   case ST_REQUIRE_PATH: // include/require pathname
+			Vlen = parse_value(ctx, KW, &s, V, Vlen, "Pathname");
+			if (0 > Vlen)
+				return 0;
+			TRANSIT(ST_REQUIRE_TERM, "path '%.*s'", Vlen, V);
+			break;
+		   case ST_REQUIRE_TERM: // after include/require
+			if (*s == ',') {
+				TRANSIT(ST_REQUIRE_PATH, " comma");
+			} else if (*s == '.') {
+				TRANSIT(ST_REQUIRE_PATH, " period");
+				s++;
+				break;
+			} else if (*s == ';') {
+// NOTE: we can enter here from the top of the loop, with *s == '\n',
+// or from down below, with *s == '\0'.
+require_term:			TRANSIT(ST_KEYWORD, " semicolon");
+			} else {
+				PR_ERR(ctx, "Invalid '%c'", *s);
+				return 0;
+			}
 			struct defcon_context Nctx[1];
 			Nctx->module_number = ctx->module_number;
 			Nctx->file = V;
@@ -395,26 +598,35 @@ TSRMLS_DC) {
 			if (	!config_read(Nctx, KW TSRMLS_CC)
 			     && KW == KW_REQUIRE)
 				return 0;
-
-			TRANSIT(ST_REQUIRE_TERM, "");
+			Vlen = 0;
+			if (*s == '\n')
+				ctx->line++;
+			if (*s != '\0')
+				s++;
 			break;
-		   case ST_REQUIRE_TERM: // after include/require
-			if (*s == ',') {
-				TRANSIT(ST_REQUIRE_PATH, " comma");
-				s++;
-				break;
-			}
-			if (*s == ';') {
-				TRANSIT(ST_KEYWORD, " semicolon");
-				s++;
-				break;
-			}
-			PR_ERR(ctx, "Invalid '%c'", *s);
-			return 0;
 		}
 	}
 
+	switch (state) {
+		case ST_KEYWORD:
+			break;
+		case ST_CONST_TERM:
+			goto const_term;
+		case ST_REQUIRE_TERM:
+			goto require_term;
+		default:
+			PR_ERR(ctx, "Input ends while in state %d", state);
+			return 0;
+	}
+
 	return 1;
+}
+
+static inline int read_dir_order(
+	const void *a,
+	const void *b
+) {
+	return strcmp(*((char **) a), *((char **) b));
 }
 
 static int config_read_dir(
@@ -425,6 +637,8 @@ TSRMLS_DC) {
 	DIR *dir = opendir(ctx->file);
 	int len, res;
 	struct defcon_context Nctx[1];
+	char **work;
+	int i, n_work;
 
 	if (!dir)
 		goto error;
@@ -434,22 +648,36 @@ TSRMLS_DC) {
 	de = emalloc(offsetof(struct dirent, d_name)
 		     + pathconf(ctx->file, _PC_NAME_MAX)
 		     + 1);
-	res = 1;
-	while (res && 0 == readdir_r(dir, de, &dep)) {
+	n_work = 0;
+	work = emalloc(sizeof(*work));
+	// pass 1 - read directory and remember all files matching .conf
+	while (0 == readdir_r(dir, de, &dep)) {
 		if (!dep)
 			break;
 		len = strlen(de->d_name);
 		if (len < 6 || 0 != strcmp(".conf", de->d_name + len - 5))
 			continue;
-		Nctx->module_number = ctx->module_number;
-		Nctx->file = emalloc(strlen(ctx->file) + 1 + len + 1);
-		Nctx->line = 1;
-		sprintf(Nctx->file, "%s/%s", ctx->file, de->d_name);
-		if (!config_read(Nctx, KW TSRMLS_CC) && KW == KW_REQUIRE)
-			res = 0;
-		efree(Nctx->file);
+		work[n_work++] = estrdup(de->d_name);
+		work = erealloc(work, (n_work+1) * sizeof(*work));
 	}
 	efree(de);
+	// pass 2 - sort names and then use them
+	qsort(work, n_work, sizeof(*work), read_dir_order);
+	for (res = 1, i = 0; i < n_work; i++) {
+		if (res) {
+			Nctx->module_number = ctx->module_number;
+			len = strlen(work[i]);
+			Nctx->file = emalloc(strlen(ctx->file) + 1 + len + 1);
+			Nctx->line = 1;
+			sprintf(Nctx->file, "%s/%s", ctx->file, work[i]);
+			if (	!config_read(Nctx, KW TSRMLS_CC)
+			     && KW == KW_REQUIRE)
+				res = 0;
+			efree(Nctx->file);
+		}
+		efree(work[i]);
+	}
+	efree(work);
 	return res;
 
 error:

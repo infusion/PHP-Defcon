@@ -2,6 +2,7 @@
 Fail constant redefinition
 --INI--
 defcon.config-file = tests/parser_error10.conf
+error_log = /dev/null
 --FILE--
 <?php
 echo "OK\n";
