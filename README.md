@@ -55,7 +55,7 @@ Constant Value Syntax
 ---------------------
 
 You can write the constant values, after the '=' sign, either surrounded
-by single or double quotes, or without any quotes.
+by quotes, or without any quotes.
 
 If you write values **without any quotes**, the value will end as soon as some
 syntactically relevant character is encountered, like whitespace, newline,
@@ -63,8 +63,15 @@ comma, semicolon, and sometimes a dot. **Furthermore** if such an unquoted
 value happens to be the name of an **already defined constant**, the value
 of that constant is **substituted** in its place.
 
-Single and double quoted strings work like you are used to from PHP,
-including backslash escaping within the strings.
+Quoted strings work almost like in PHP itself:
+
+* Single quoted strings permit backslash escapes for embedding a single quote,
+  or a backslash itself; all other backslashes are left alone.
+* Double quoted strings permit the full set of backslash escapes.
+  However, no effort is made to implement Dollar (Variable) substitution!
+* Backtick quoted strings first interpret the content like double quoted
+  strings, wrt. backslash escapes, and then run the result as a shell
+  command, substituting the command output.
 
 For *string* constants, as well as the pathes of *require* and *include*
 statements, you can additionally use the dot '.' character to concatenate
@@ -74,6 +81,11 @@ constants, like in the following example:
 
 	string PREFIX = "/usr/local"
 	string BIN = PREFIX . "/bin"
+
+**NOTE:** for any single constant assignment, the *overall* length of
+the value is restricted to a compile time constant, 4096 byte. This is
+usually warned about when it happens, except for backtick command
+substitution, where the command output is silently truncated.
 
 Installation
 ============
