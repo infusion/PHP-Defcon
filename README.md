@@ -19,6 +19,9 @@ A Better alternative would be using Defcon. An Example config file could look li
 	string DB_PASS = "yS3cR37PW!";
 	string DB_NAME = "test";
 
+	# Store the eth0 IP into a constant using the backtick operator
+	string HOST_IP = `ifconfig eth0 | sed -n 's/ *inet addr:\([0-9.]\+\).*/\1/p'`
+
 	# Parsertest
 	int T1 = 123;
 	int T2 = 1.3;
