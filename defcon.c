@@ -328,7 +328,7 @@ static int parse_value_quoted(
 	int extraline = 0;
 
 	for (i = Vlen; **sp && **sp != quote; (*sp)++, i++) {
-		if (i > VALUELEN) {
+		if (i >= VALUELEN) {
 			PR_ERR(ctx, "%s too long", kind);
 			return -1;
 		}
@@ -420,7 +420,7 @@ static int parse_value_unquoted(
 	for (i = Vlen; **sp && !SEP(**sp) && !WS(**sp); (*sp)++, i++) {
 		if (may_concat && **sp == '.')
 			break;
-		if (i > VALUELEN) {
+		if (i >= VALUELEN) {
 			PR_ERR(ctx, "%s too long", kind);
 			return -1;
 		}
