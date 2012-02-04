@@ -229,8 +229,48 @@ static int replace_constant(
 	return Vlen+Nlen;
 }
 
+// given a \0-terminated string in V[Vlen+Nlen], use the substring starting
+// at V[Vlen] as a shell command, read the output of that shell command,
+// and then replace the string in V[Vlen...Vlen+Nlen] with that output text.
+// If the output of the command would make the resulting total string in
+// V[] longer than VALUELEN, it will be truncated.
+//
+// The backtick replacement works ALMOST as in PHP, but for your convenience,
+// a terminating newline will be removed from the replacement string, as it
+// will almost never be wanted. If you need it, make your command output
+// an additional newline.
+//
+// Returns the new overall length of the whole string in V[].
+static int replace_shellcommand(
+	struct defcon_context *ctx,
+	char *V,
+	int Vlen,
+	int Nlen
+) {
+	FILE *fp = popen(V+Vlen, "r");
+	char newV[VALUELEN+1];
+	int have, got;
+
+	if (!fp)
+		return Vlen+Nlen;
+	for (have = 0; !feof(fp) && have < VALUELEN; have += got)
+		got = fread(newV + have, 1, VALUELEN - have, fp);
+	pclose(fp);
+	PR_DBG(ctx, "backtick: have %d\n", have);
+	if (have > 0 && newV[have-1] == '\n') have--;
+	PR_DBG(ctx, "backtick: de-newlined to %d\n", have);
+	if (have > VALUELEN - Vlen) have = VALUELEN - Vlen;
+	PR_DBG(ctx, "backtick: truncated to %d\n", have);
+	memcpy(V + Vlen, newV, have);
+	Vlen += have;
+	V[Vlen] = '\0';
+	PR_DBG(ctx, "backtick: new Vlen %d\n", Vlen);
+	return Vlen;
+}
+
 #define WS(C) (C == ' ' || C == '\n' || C == '\t' || C == '\r')
 #define SEP(C) (C == ',' || C == ';')
+#define QUOTE(C) (C == '\'' || C == '"' || C == '`')
 #define ALPHA(C) ((C >= 'a' && C <= 'z') || (C >= 'A' && C <= 'Z'))
 #define ALNUM(C) (ALPHA(C) || (C >= '0' && C <= '9') || C == '_')
 
@@ -299,6 +339,12 @@ static int hex_digit(int c)
 // Parse a quoted string value. The leading quote character has already
 // been skipped over. Its character value, is given in the 'quote' argument.
 //
+// There are three different ways to quote:
+// - single quotes, with almost no backslash escaping
+// - double quotes, with full backslash escaping
+// - backtick quotes, like double quotes, running the thing quoted
+//   as a shell command and substituting the output of that run.
+//
 // Quoted strings continue until the matching closing quote character
 // is found, even over newlines, which result in the newline being
 // included in the string content.
@@ -342,7 +388,7 @@ static int parse_value_quoted(
 			goto unterminated;
 		static char *sqspecial = "\\\\''";
 		static char *dqspecial = "n\nr\rt\tv\vf\f\\\\\"\"";
-		char *special = (quote == '"') ? dqspecial : sqspecial;
+		char *special = (quote == '\'') ? sqspecial : dqspecial;
 		for (j = 0; special[j]; j += 2)
 			if ((*sp)[1] == special[j]) {
 				V[i] = special[j+1];
@@ -391,6 +437,8 @@ unterminated:	PR_ERR(ctx, "Unterminated quoted string");
 		return -1;
 	}
 	(*sp)++;
+	if (quote == '`')
+		i = replace_shellcommand(ctx, V, Vlen, i-Vlen);
 	ctx->line += extraline;
 	return i;
 }
@@ -449,7 +497,7 @@ static int parse_value(
 	int Vlen,			// length so far
 	char *kind
 ) {
-	int quote = (**sp == '"' || **sp == '\'') ? *((*sp)++) : '\0';
+	int quote = QUOTE(**sp) ? *((*sp)++) : '\0';
 
 	if (quote)
 		return parse_value_quoted(ctx, sp, V, Vlen, kind, quote);
@@ -551,7 +599,7 @@ TSRMLS_DC) {
 			if (*s == ',') {
 				TRANSIT(ST_CONST_NAME, " comma");
 			} else if (*s == '.') {
-				TRANSIT(ST_CONST_VALUE, " period");
+				TRANSIT(ST_CONST_VALUE, " dot");
 				s++;
 				break;
 			} else if (*s == ';') {
@@ -580,7 +628,7 @@ const_term:			TRANSIT(ST_KEYWORD, " semicolon");
 			if (*s == ',') {
 				TRANSIT(ST_REQUIRE_PATH, " comma");
 			} else if (*s == '.') {
-				TRANSIT(ST_REQUIRE_PATH, " period");
+				TRANSIT(ST_REQUIRE_PATH, " dot");
 				s++;
 				break;
 			} else if (*s == ';') {
