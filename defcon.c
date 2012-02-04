@@ -256,15 +256,11 @@ static int replace_shellcommand(
 	for (have = 0; !feof(fp) && have < VALUELEN; have += got)
 		got = fread(newV + have, 1, VALUELEN - have, fp);
 	pclose(fp);
-	PR_DBG(ctx, "backtick: have %d\n", have);
 	if (have > 0 && newV[have-1] == '\n') have--;
-	PR_DBG(ctx, "backtick: de-newlined to %d\n", have);
 	if (have > VALUELEN - Vlen) have = VALUELEN - Vlen;
-	PR_DBG(ctx, "backtick: truncated to %d\n", have);
 	memcpy(V + Vlen, newV, have);
 	Vlen += have;
 	V[Vlen] = '\0';
-	PR_DBG(ctx, "backtick: new Vlen %d\n", Vlen);
 	return Vlen;
 }
 
