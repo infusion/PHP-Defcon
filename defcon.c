@@ -271,23 +271,34 @@ static int replace_shellcommand(
 #define ALPHA(C) ((C >= 'a' && C <= 'z') || (C >= 'A' && C <= 'Z'))
 #define ALNUM(C) (ALPHA(C) || (C >= '0' && C <= '9') || C == '_')
 
-static int parse_keyword(
+// Match the input at *sp as a keyword.
+// The keyword matched, is returned in kw[KEYWORDLEN+1], \0-terminated.
+// The return value is a keyword id, possibly KW_INVALID.
+static enum defcon_keyword_id parse_keyword(
 	struct defcon_context *ctx,
 	char **sp,
 	char *kw
 ) {
 	int i;
+	enum defcon_keyword_id kwid;
+
 	for (i = 0; ALPHA(**sp); (*sp)++, i++) {
-		if (i > KEYWORDLEN) {
+		if (i >= KEYWORDLEN) {
 			PR_ERR(ctx, "Keyword too long");
-			return 0;
+			return KW_INVALID;
 		}
 		kw[i] = **sp;
 	}
 	kw[i] = '\0';
-	return i;
+	kwid = match_keyword(kw);
+	if (KW_INVALID == kwid)
+		PR_ERR(ctx, "No valid keyword (%s)", kw);
+	return kwid;
 }
 
+// Match the input at *sp as a constant name.
+// The constant name is returned in N[NAMELEN+1], \0-terminated.
+// The function returns 1 (true) whe OK, and 0 (false) otherwise.
 static int parse_constantname(
 	struct defcon_context *ctx,
 	char **sp,
@@ -296,7 +307,7 @@ static int parse_constantname(
 	int i;
 
 	for (i = 0; ALNUM(**sp); (*sp)++, i++) {
-		if (i > NAMELEN) {
+		if (i >= NAMELEN) {
 			PR_ERR(ctx, "Constant name too long");
 			return 0;
 		}
@@ -307,8 +318,12 @@ static int parse_constantname(
 		PR_ERR(ctx, "No Constant name set");
 		return 0;
 	}
+	if (KW_INVALID != match_keyword(N)) {
+		PR_ERR(ctx, "Constant name '%s' should not be a keyword", N);
+		return 0;
+	}
 
-	return i;
+	return 1;
 }
 
 // given a single character in c, either return -1 if it is not a
@@ -555,27 +570,14 @@ TSRMLS_DC) {
 
 		switch (state) {
 		   case ST_KEYWORD:
-			if (0 >= (i = parse_keyword(ctx, &s, kw)))
+			if (KW_INVALID == (KW = parse_keyword(ctx, &s, kw)))
 				return 0;
-
-			KW = match_keyword(kw);
-			if (KW_INVALID == KW) {
-				PR_ERR(ctx, "No valid keyword (%s)", kw);
-				return 0;
-			}
 			Vlen = 0;
-			TRANSIT(keywords[KW].state, " KW %.*s", i, kw);
+			TRANSIT(keywords[KW].state, " KW %.*s", kw);
 			break;
 		   case ST_CONST_NAME:
-			if (0 >= (i = parse_constantname(ctx, &s, N)))
+			if (!parse_constantname(ctx, &s, N))
 				return 0;
-
-			if (KW_INVALID != match_keyword(N)) {
-				PR_ERR(ctx, "Constant name '%s' should"
-					    " not be a keyword", N);
-				return 0;
-			}
-
 			TRANSIT(ST_CONST_EQUAL, " name %.*s", i, N);
 			break;
 		   case ST_CONST_EQUAL:

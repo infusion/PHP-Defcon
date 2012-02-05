@@ -1,5 +1,5 @@
 --TEST--
-Fail on-the-boundars overly long value
+Fail on-the-boundary overly long value
 --INI--
 defcon.config-file = tests/parser_error15.conf
 error_log = /dev/null
