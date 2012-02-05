@@ -573,12 +573,12 @@ TSRMLS_DC) {
 			if (KW_INVALID == (KW = parse_keyword(ctx, &s, kw)))
 				return 0;
 			Vlen = 0;
-			TRANSIT(keywords[KW].state, " KW %.*s", kw);
+			TRANSIT(keywords[KW].state, " KW %s", kw);
 			break;
 		   case ST_CONST_NAME:
 			if (!parse_constantname(ctx, &s, N))
 				return 0;
-			TRANSIT(ST_CONST_EQUAL, " name %.*s", i, N);
+			TRANSIT(ST_CONST_EQUAL, " name %s", N);
 			break;
 		   case ST_CONST_EQUAL:
 			if (*s != '=') {
