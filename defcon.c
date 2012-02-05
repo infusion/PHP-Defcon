@@ -382,9 +382,9 @@ static int parse_value_quoted(
 		// interpret the next character for a backslash escape
 		if ((*sp)[1] == '\0')
 			goto unterminated;
-		static char *sqspecial = "\\\\''";
-		static char *dqspecial = "n\nr\rt\tv\vf\f\\\\\"\"";
-		char *special = (quote == '\'') ? sqspecial : dqspecial;
+		char *special = (quote == '\'')
+			? "\\\\''"
+			: "n\nr\rt\tv\vf\f\\\\\"\"";
 		for (j = 0; special[j]; j += 2)
 			if ((*sp)[1] == special[j]) {
 				V[i] = special[j+1];
