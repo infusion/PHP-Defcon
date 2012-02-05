@@ -37,7 +37,7 @@ static function_entry defcon_functions[] = {
 };
 
 PHP_INI_BEGIN()
-PHP_INI_ENTRY("defcon.config-file", "/etc/defcon.conf", PHP_INI_ALL, NULL )
+PHP_INI_ENTRY("defcon.config-file", "/etc/defcon.conf", PHP_INI_SYSTEM, NULL )
 PHP_INI_END()
 
 zend_module_entry defcon_module_entry = {
