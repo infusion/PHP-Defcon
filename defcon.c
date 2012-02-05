@@ -117,12 +117,13 @@ static struct defcon_keyword keywords[] = {
 #define NR_KW (sizeof(keywords)/sizeof(keywords[0]))
 
 static enum defcon_keyword_id match_keyword(
-	const char *g
+	const char *kw
 ) {
-	int i;
-	for (i = 0; i < NR_KW; i++) {
-		if (0 == strcasecmp(keywords[i].name, g))
-		return i;
+	enum defcon_keyword_id id;
+
+	for (id = 0; id < NR_KW; id++) {
+		if (0 == strcasecmp(keywords[id].name, kw))
+		return id;
 	}
 	return KW_INVALID;
 }
@@ -211,20 +212,20 @@ static int replace_constant(
 	int Vlen,
 	int Nlen
 ) {
-	zval *Z;
+	zval *Z[1];
 	int newlen;
 
-	if (zend_hash_find(EG(zend_constants), V+Vlen, Nlen+1, (void **)&Z)
+	if (zend_hash_find(EG(zend_constants), V+Vlen, Nlen+1, (void **)Z)
 		== SUCCESS) {
-		SEPARATE_ZVAL(&Z);
-		convert_to_string_ex(&Z);
-		newlen = Vlen + Z_STRLEN_PP(&Z);
+		SEPARATE_ZVAL(Z);
+		convert_to_string_ex(Z);
+		newlen = Vlen + Z_STRLEN_PP(Z);
 		if (newlen <= VALUELEN) {
-			memcpy(V+Vlen, Z_STRVAL_PP(&Z), Z_STRLEN_PP(&Z)+1);
-			zval_ptr_dtor(&Z);
+			memcpy(V+Vlen, Z_STRVAL_PP(Z), Z_STRLEN_PP(Z)+1);
+			zval_ptr_dtor(Z);
 			return newlen;
 		}
-		zval_ptr_dtor(&Z);
+		zval_ptr_dtor(Z);
 	}
 	return Vlen+Nlen;
 }
@@ -495,15 +496,16 @@ static int parse_value(
 ) {
 	int quote = QUOTE(**sp) ? *((*sp)++) : '\0';
 
-	if (quote)
-		return parse_value_quoted(ctx, sp, V, Vlen, kind, quote);
-	return parse_value_unquoted(ctx, sp, V, Vlen, kind,
+	return quote
+		? parse_value_quoted(ctx, sp, V, Vlen, kind, quote)
+		: parse_value_unquoted(ctx, sp, V, Vlen, kind,
 					keywords[KW].may_concat);
 }
 
 static int config_read(
-	struct defcon_context *ctx,
-	enum defcon_keyword_id KW
+	struct defcon_context *oldctx,
+	enum defcon_keyword_id KW,
+	char *file
 TSRMLS_DC);
 
 static int config_parse(
@@ -635,11 +637,7 @@ require_term:			TRANSIT(ST_KEYWORD, " semicolon");
 				PR_ERR(ctx, "Invalid '%c'", *s);
 				return 0;
 			}
-			struct defcon_context Nctx[1];
-			Nctx->module_number = ctx->module_number;
-			Nctx->file = V;
-			Nctx->line = 1;
-			if (	!config_read(Nctx, KW TSRMLS_CC)
+			if (	!config_read(ctx, KW, V TSRMLS_CC)
 			     && KW == KW_REQUIRE)
 				return 0;
 			Vlen = 0;
@@ -680,8 +678,7 @@ TSRMLS_DC) {
 	struct dirent *de, *dep;
 	DIR *dir = opendir(ctx->file);
 	int len, res;
-	struct defcon_context Nctx[1];
-	char **work;
+	char *file, **work;
 	int i, n_work;
 
 	if (!dir)
@@ -709,15 +706,13 @@ TSRMLS_DC) {
 	qsort(work, n_work, sizeof(*work), read_dir_order);
 	for (res = 1, i = 0; i < n_work; i++) {
 		if (res) {
-			Nctx->module_number = ctx->module_number;
 			len = strlen(work[i]);
-			Nctx->file = emalloc(strlen(ctx->file) + 1 + len + 1);
-			Nctx->line = 1;
-			sprintf(Nctx->file, "%s/%s", ctx->file, work[i]);
-			if (	!config_read(Nctx, KW TSRMLS_CC)
+			file = emalloc(strlen(ctx->file) + 1 + len + 1);
+			sprintf(file, "%s/%s", ctx->file, work[i]);
+			if (	!config_read(ctx, KW, file TSRMLS_CC)
 			     && KW == KW_REQUIRE)
 				res = 0;
-			efree(Nctx->file);
+			efree(file);
 		}
 		efree(work[i]);
 	}
@@ -734,12 +729,18 @@ error:
 }
 
 static int config_read(
-	struct defcon_context *ctx,
-	enum defcon_keyword_id KW
+	struct defcon_context *oldctx,
+	enum defcon_keyword_id KW,
+	char *file
 TSRMLS_DC) {
 	FILE *fd;
 	struct stat st;
 	int res;
+	struct defcon_context ctx[1];
+
+	ctx->module_number = oldctx->module_number;
+	ctx->file = file;
+	ctx->line = 1;
 
 	if (0 > stat(ctx->file, &st))
 		goto error;
@@ -789,15 +790,14 @@ PHP_MINIT_FUNCTION(defcon) {
 
 	struct defcon_context ctx[1];
 	ctx->module_number = module_number;
-	ctx->file = INI_STR("defcon.config-file");
-	ctx->line = 1;
+	char *file = INI_STR("defcon.config-file");
 
-	if(NULL == ctx->file || 0 == strcmp(ctx->file, "")) {
+	if(NULL == file || 0 == strcmp(file, "")) {
 		php_error(E_WARNING, "defcon: No Configfile set...");
 		return SUCCESS;
 	}
 
-	config_read(ctx, KW_INVALID TSRMLS_CC);
+	config_read(ctx, KW_INVALID, file TSRMLS_CC);
 
 	return SUCCESS;
 }
