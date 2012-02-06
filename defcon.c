@@ -141,6 +141,9 @@ struct defcon_context {
 #define PR_WARN(CTX, FMT, ...) \
 	php_error(E_WARNING, "defcon: %s line %i: " FMT, \
 		 (CTX)->file, (CTX)->line, ## __VA_ARGS__)
+#define PR_NOTICE(CTX, FMT, ...) \
+	php_error(E_NOTICE, "defcon: %s line %i: " FMT, \
+		 (CTX)->file, (CTX)->line, ## __VA_ARGS__)
 #if DEBUG_OUTPUT
 #define PR_DBG(CTX, FMT, ...) \
 	fprintf(stderr, "DEFCON %s:%i " FMT, \
@@ -149,7 +152,17 @@ struct defcon_context {
 #define PR_DBG(CTX, FMT, ...) do {} while (0)
 #endif
 
-static int add_constant(
+static inline zval *find_constant(
+	char *N,
+	int Nlen
+) {
+	zval *Z[1];
+
+	return zend_hash_find(EG(zend_constants), N, Nlen+1, (void **)Z)
+		== SUCCESS ? *Z : 0;
+}
+
+static void add_constant(
 	struct defcon_context *ctx,
 	enum defcon_keyword_id KW,
 	char *N,
@@ -195,10 +208,9 @@ TSRMLS_DC) {
 	zc.module_number = ctx->module_number;
 
 	if (zend_register_constant(&zc TSRMLS_CC) == FAILURE)
-		PR_ERR(ctx, "Constant '%s' redefined", N);
-
-	PR_DBG(ctx, "DONE: define('%s', '%.*s')\n", N, Vlen, V);
-	return 1;
+		PR_ERR(ctx, "FAILED: define('%s', '%.*s')\n", N, Vlen, V);
+	else
+		PR_DBG(ctx, "DONE: define('%s', '%.*s')\n", N, Vlen, V);
 }
 
 // given a string in V[Vlen+Nlen], use the substring starting at V[Vlen]
@@ -215,8 +227,7 @@ static int replace_constant(
 	zval *Z[1];
 	int newlen;
 
-	if (zend_hash_find(EG(zend_constants), V+Vlen, Nlen+1, (void **)Z)
-		== SUCCESS) {
+	if (0 != (*Z = find_constant(V+Vlen, Nlen))) {
 		SEPARATE_ZVAL(Z);
 		convert_to_string_ex(Z);
 		newlen = Vlen + Z_STRLEN_PP(Z);
@@ -296,30 +307,49 @@ static enum defcon_keyword_id parse_keyword(
 	return kwid;
 }
 
-// Match the input at *sp as a constant name.
-// The constant name is returned in N[NAMELEN+1], \0-terminated.
-// The function returns 1 (true) whe OK, and 0 (false) otherwise.
+// Match the input at *sp as a constant name. Check whether that constant
+// is not already defined.
+//
+// If all is well, 1 is returned, and the name is stored at N, \0-terminated.
+//
+// If the constant already exists and should not be redefined, 0 is returned.
+// A suitable error message is logged, unless the given constant name
+// started with a '@' shutup operator.
+//
+// If an invalid constant name is detected, -1 is returned, after a suitable
+// error message is logged.
+//
+//
 static int parse_constantname(
 	struct defcon_context *ctx,
 	char **sp,
 	char *N
 ) {
-	int i;
+	int i, shutup = 0;
 
+	if (**sp == '@') {
+		(*sp)++;
+		shutup = 1;
+	}
 	for (i = 0; ALNUM(**sp); (*sp)++, i++) {
 		if (i >= NAMELEN) {
 			PR_ERR(ctx, "Constant name too long");
-			return 0;
+			return -1;
 		}
 		N[i] = **sp;
 	}
 	N[i] = '\0';
 	if (i == 0) {
 		PR_ERR(ctx, "No Constant name set");
-		return 0;
+		return -1;
 	}
 	if (KW_INVALID != match_keyword(N)) {
 		PR_ERR(ctx, "Constant name '%s' should not be a keyword", N);
+		return -1;
+	}
+	if (find_constant(N, i)) {
+		if (!shutup)
+			PR_NOTICE(ctx, "Constant '%s' redefined", N);
 		return 0;
 	}
 
@@ -529,7 +559,7 @@ static int config_parse(
 TSRMLS_DC) {
 	char kw[KEYWORDLEN + 1], N[NAMELEN + 1], V[VALUELEN + 1];
 	int Vlen;
-	int i, j;
+	int do_def, i, j;
 	char c, *ps;
 	enum defcon_keyword_id KW;
 	enum defcon_state_id state = ST_KEYWORD;
@@ -576,7 +606,7 @@ TSRMLS_DC) {
 			TRANSIT(keywords[KW].state, " KW %s", kw);
 			break;
 		   case ST_CONST_NAME:
-			if (!parse_constantname(ctx, &s, N))
+			if (0 > (do_def = parse_constantname(ctx, &s, N)))
 				return 0;
 			TRANSIT(ST_CONST_EQUAL, " name %s", N);
 			break;
@@ -610,8 +640,8 @@ const_term:			TRANSIT(ST_KEYWORD, " semicolon");
 				PR_ERR(ctx, "Invalid '%c'", *s);
 				return 0;
 			}
-			if (!add_constant(ctx, KW, N, V, Vlen TSRMLS_CC))
-				return 0;
+			if (do_def)
+				add_constant(ctx, KW, N, V, Vlen TSRMLS_CC);
 			Vlen = 0;
 			if (*s == '\n')
 				ctx->line++;
