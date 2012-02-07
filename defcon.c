@@ -216,6 +216,9 @@ TSRMLS_DC) {
 // given a string in V[Vlen+Nlen], use the substring starting at V[Vlen]
 // to look up an already defined constant, and if it is already defined,
 // replace the string in V[Vlen...Vlen+Nlen] with that constant's value.
+// If the resulting total string would become too long, truncate the
+// replacement value.
+//
 // Returns the new overall length of the string in V[], whether replacement
 // was done, or not.
 static int replace_constant(
@@ -224,21 +227,48 @@ static int replace_constant(
 	int Vlen,
 	int Nlen
 ) {
-	zval *Z[1];
-	int newlen;
+	zval *Z;
+	char *newV, strV[VALUELEN+1];
+	int newVlen;
 
-	if (0 != (*Z = find_constant(V+Vlen, Nlen))) {
-		SEPARATE_ZVAL(Z);
-		convert_to_string_ex(Z);
-		newlen = Vlen + Z_STRLEN_PP(Z);
-		if (newlen <= VALUELEN) {
-			memcpy(V+Vlen, Z_STRVAL_PP(Z), Z_STRLEN_PP(Z)+1);
-			zval_ptr_dtor(Z);
-			return newlen;
-		}
-		zval_ptr_dtor(Z);
+	if (0 == (Z = find_constant(V+Vlen, Nlen)))
+no_replace:	return Vlen+Nlen;
+
+	switch (Z_TYPE_P(Z)) {
+	   case IS_NULL:
+		return Vlen;	// NULL: replacement is empty string
+	   case IS_LONG:
+		sprintf(strV, "%ld", Z_LVAL_P(Z));
+		break;
+	   case IS_DOUBLE:
+		// NOTE: the %.13f format _seems_ to be what PHP does
+		// when converting double to string. I cannot find any
+		// documentation on that, though.
+		sprintf(strV, "%.13f", Z_DVAL_P(Z));
+		break;
+	   case IS_BOOL:
+		if (!Z_BVAL_P(Z))
+			return Vlen;	// false: replacement is empty string
+		// true: replacement is string "1"
+		newV = "1";
+		newVlen = 1;
+		goto use_newV;
+	   case IS_STRING:
+		newV = Z_STRVAL_P(Z);
+		newVlen = Z_STRLEN_P(Z);
+		goto use_newV;
+	   default:
+		goto no_replace;
 	}
-	return Vlen+Nlen;
+	newV = strV;
+	newVlen = strlen(newV);
+use_newV:
+	if (Vlen + newVlen > VALUELEN)
+		newVlen = VALUELEN - Vlen;
+	memcpy(V+Vlen, newV, newVlen);
+	Vlen += newVlen;
+	V[Vlen] = '\0';
+	return Vlen;
 }
 
 // given a \0-terminated string in V[Vlen+Nlen], use the substring starting
