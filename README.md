@@ -27,6 +27,7 @@ A Better alternative would be using Defcon. An Example config file could look li
 	int T2 = 1.3;
 	int T3 = "test";
 	real T4 = 1;
+	int @T3 = "toast";
 
 	string T5 = hello # should work too
 
@@ -53,6 +54,41 @@ statement, really happens to be a **directory**, all files from that
 directory with names ending in **.conf** will be read, in sorted order.
 If any of these names is again a directory, that other directory
 will be read, recursively.
+
+Type keywords
+-------------
+
+Constant definitions are typed, and always must start with a type keyword.
+The following types are recognized:
+
+* **string** defines an arbitrary string constant
+* **int** with synonym *long* and *short*
+* **double** with synonyms *real* and *float*
+* **bool** with synonyms *boolean* and *logical*
+
+The type keyword must always be followed by one or more constant
+definitions, each comprised of a constant name, an equal '=' sign,
+and a value.
+
+Multiple such constant definitions of the same type,
+may be separated using a comma ',' operator, without repeating
+the type keyword - like this:
+
+	string OneString = "aaa" , AnotherString = "bbb"
+
+Constant Name Syntax
+--------------------
+
+Constant names must start with a letter (A-Z or a-z) or underscore.
+From the second place on, digits are also permitted.
+
+Constant names can be 64 characters long, at maximum.
+
+The constant names are defined to be case sensitive.
+
+If the constant name specification starts with the special '@' sign,
+and the constant is already defined at that point, the usual Notice
+about duplicate definition, is suppressed.
 
 Constant Value Syntax
 ---------------------
