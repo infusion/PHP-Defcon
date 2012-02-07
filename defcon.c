@@ -309,8 +309,8 @@ static int replace_shellcommand(
 #define WS(C) (C == ' ' || C == '\n' || C == '\t' || C == '\r')
 #define SEP(C) (C == ',' || C == ';')
 #define QUOTE(C) (C == '\'' || C == '"' || C == '`')
-#define ALPHA(C) ((C >= 'a' && C <= 'z') || (C >= 'A' && C <= 'Z'))
-#define ALNUM(C) (ALPHA(C) || (C >= '0' && C <= '9') || C == '_')
+#define ALPHA(C) ((C >= 'a' && C <= 'z') || (C >= 'A' && C <= 'Z') || C == '_')
+#define ALNUM(C) (ALPHA(C) || (C >= '0' && C <= '9'))
 
 // Match the input at *sp as a keyword.
 // The keyword matched, is returned in kw[KEYWORDLEN+1], \0-terminated.
@@ -361,6 +361,10 @@ static int parse_constantname(
 		(*sp)++;
 		shutup = 1;
 	}
+	if (!ALPHA(**sp)) {
+		PR_ERR(ctx, "No Constant name set");
+		return -1;
+	}
 	for (i = 0; ALNUM(**sp); (*sp)++, i++) {
 		if (i >= NAMELEN) {
 			PR_ERR(ctx, "Constant name too long");
@@ -369,10 +373,6 @@ static int parse_constantname(
 		N[i] = **sp;
 	}
 	N[i] = '\0';
-	if (i == 0) {
-		PR_ERR(ctx, "No Constant name set");
-		return -1;
-	}
 	if (KW_INVALID != match_keyword(N)) {
 		PR_ERR(ctx, "Constant name '%s' should not be a keyword", N);
 		return -1;
