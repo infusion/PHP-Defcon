@@ -37,7 +37,7 @@ static function_entry defcon_functions[] = {
 };
 
 PHP_INI_BEGIN()
-PHP_INI_ENTRY("defcon.config-file", "/etc/defcon.conf", PHP_INI_ALL, NULL )
+PHP_INI_ENTRY("defcon.config-file", "/etc/defcon.conf", PHP_INI_SYSTEM, NULL )
 PHP_INI_END()
 
 zend_module_entry defcon_module_entry = {
@@ -117,12 +117,13 @@ static struct defcon_keyword keywords[] = {
 #define NR_KW (sizeof(keywords)/sizeof(keywords[0]))
 
 static enum defcon_keyword_id match_keyword(
-	const char *g
+	const char *kw
 ) {
-	int i;
-	for (i = 0; i < NR_KW; i++) {
-		if (0 == strcasecmp(keywords[i].name, g))
-		return i;
+	enum defcon_keyword_id id;
+
+	for (id = 0; id < NR_KW; id++) {
+		if (0 == strcasecmp(keywords[id].name, kw))
+		return id;
 	}
 	return KW_INVALID;
 }
@@ -140,6 +141,9 @@ struct defcon_context {
 #define PR_WARN(CTX, FMT, ...) \
 	php_error(E_WARNING, "defcon: %s line %i: " FMT, \
 		 (CTX)->file, (CTX)->line, ## __VA_ARGS__)
+#define PR_NOTICE(CTX, FMT, ...) \
+	php_error(E_NOTICE, "defcon: %s line %i: " FMT, \
+		 (CTX)->file, (CTX)->line, ## __VA_ARGS__)
 #if DEBUG_OUTPUT
 #define PR_DBG(CTX, FMT, ...) \
 	fprintf(stderr, "DEFCON %s:%i " FMT, \
@@ -148,7 +152,17 @@ struct defcon_context {
 #define PR_DBG(CTX, FMT, ...) do {} while (0)
 #endif
 
-static int add_constant(
+static inline zval *find_constant(
+	char *N,
+	int Nlen
+) {
+	zval *Z[1];
+
+	return zend_hash_find(EG(zend_constants), N, Nlen+1, (void **)Z)
+		== SUCCESS ? *Z : 0;
+}
+
+static void add_constant(
 	struct defcon_context *ctx,
 	enum defcon_keyword_id KW,
 	char *N,
@@ -194,15 +208,17 @@ TSRMLS_DC) {
 	zc.module_number = ctx->module_number;
 
 	if (zend_register_constant(&zc TSRMLS_CC) == FAILURE)
-		PR_ERR(ctx, "Constant '%s' redefined", N);
-
-	PR_DBG(ctx, "DONE: define('%s', '%.*s')\n", N, Vlen, V);
-	return 1;
+		PR_ERR(ctx, "FAILED: define('%s', '%.*s')\n", N, Vlen, V);
+	else
+		PR_DBG(ctx, "DONE: define('%s', '%.*s')\n", N, Vlen, V);
 }
 
 // given a string in V[Vlen+Nlen], use the substring starting at V[Vlen]
 // to look up an already defined constant, and if it is already defined,
 // replace the string in V[Vlen...Vlen+Nlen] with that constant's value.
+// If the resulting total string would become too long, truncate the
+// replacement value.
+//
 // Returns the new overall length of the string in V[], whether replacement
 // was done, or not.
 static int replace_constant(
@@ -212,21 +228,47 @@ static int replace_constant(
 	int Nlen
 ) {
 	zval *Z;
-	int newlen;
+	char *newV, strV[VALUELEN+1];
+	int newVlen;
 
-	if (zend_hash_find(EG(zend_constants), V+Vlen, Nlen+1, (void **)&Z)
-		== SUCCESS) {
-		SEPARATE_ZVAL(&Z);
-		convert_to_string_ex(&Z);
-		newlen = Vlen + Z_STRLEN_PP(&Z);
-		if (newlen <= VALUELEN) {
-			memcpy(V+Vlen, Z_STRVAL_PP(&Z), Z_STRLEN_PP(&Z)+1);
-			zval_ptr_dtor(&Z);
-			return newlen;
-		}
-		zval_ptr_dtor(&Z);
+	if (0 == (Z = find_constant(V+Vlen, Nlen)))
+no_replace:	return Vlen+Nlen;
+
+	switch (Z_TYPE_P(Z)) {
+	   case IS_NULL:
+		return Vlen;	// NULL: replacement is empty string
+	   case IS_LONG:
+		sprintf(strV, "%ld", Z_LVAL_P(Z));
+		break;
+	   case IS_DOUBLE:
+		// NOTE: the %.13f format _seems_ to be what PHP does
+		// when converting double to string. I cannot find any
+		// documentation on that, though.
+		sprintf(strV, "%.13f", Z_DVAL_P(Z));
+		break;
+	   case IS_BOOL:
+		if (!Z_BVAL_P(Z))
+			return Vlen;	// false: replacement is empty string
+		// true: replacement is string "1"
+		newV = "1";
+		newVlen = 1;
+		goto use_newV;
+	   case IS_STRING:
+		newV = Z_STRVAL_P(Z);
+		newVlen = Z_STRLEN_P(Z);
+		goto use_newV;
+	   default:
+		goto no_replace;
 	}
-	return Vlen+Nlen;
+	newV = strV;
+	newVlen = strlen(newV);
+use_newV:
+	if (Vlen + newVlen > VALUELEN)
+		newVlen = VALUELEN - Vlen;
+	memcpy(V+Vlen, newV, newVlen);
+	Vlen += newVlen;
+	V[Vlen] = '\0';
+	return Vlen;
 }
 
 // given a \0-terminated string in V[Vlen+Nlen], use the substring starting
@@ -267,47 +309,81 @@ static int replace_shellcommand(
 #define WS(C) (C == ' ' || C == '\n' || C == '\t' || C == '\r')
 #define SEP(C) (C == ',' || C == ';')
 #define QUOTE(C) (C == '\'' || C == '"' || C == '`')
-#define ALPHA(C) ((C >= 'a' && C <= 'z') || (C >= 'A' && C <= 'Z'))
-#define ALNUM(C) (ALPHA(C) || (C >= '0' && C <= '9') || C == '_')
+#define ALPHA(C) ((C >= 'a' && C <= 'z') || (C >= 'A' && C <= 'Z') || C == '_')
+#define ALNUM(C) (ALPHA(C) || (C >= '0' && C <= '9'))
 
-static int parse_keyword(
+// Match the input at *sp as a keyword.
+// The keyword matched, is returned in kw[KEYWORDLEN+1], \0-terminated.
+// The return value is a keyword id, possibly KW_INVALID.
+static enum defcon_keyword_id parse_keyword(
 	struct defcon_context *ctx,
 	char **sp,
 	char *kw
 ) {
 	int i;
+	enum defcon_keyword_id kwid;
+
 	for (i = 0; ALPHA(**sp); (*sp)++, i++) {
-		if (i > KEYWORDLEN) {
+		if (i >= KEYWORDLEN) {
 			PR_ERR(ctx, "Keyword too long");
-			return 0;
+			return KW_INVALID;
 		}
 		kw[i] = **sp;
 	}
 	kw[i] = '\0';
-	return i;
+	kwid = match_keyword(kw);
+	if (KW_INVALID == kwid)
+		PR_ERR(ctx, "No valid keyword (%s)", kw);
+	return kwid;
 }
 
+// Match the input at *sp as a constant name. Check whether that constant
+// is not already defined.
+//
+// If all is well, 1 is returned, and the name is stored at N, \0-terminated.
+//
+// If the constant already exists and should not be redefined, 0 is returned.
+// A suitable error message is logged, unless the given constant name
+// started with a '@' shutup operator.
+//
+// If an invalid constant name is detected, -1 is returned, after a suitable
+// error message is logged.
+//
+//
 static int parse_constantname(
 	struct defcon_context *ctx,
 	char **sp,
 	char *N
 ) {
-	int i;
+	int i, shutup = 0;
 
+	if (**sp == '@') {
+		(*sp)++;
+		shutup = 1;
+	}
+	if (!ALPHA(**sp)) {
+		PR_ERR(ctx, "No Constant name set");
+		return -1;
+	}
 	for (i = 0; ALNUM(**sp); (*sp)++, i++) {
-		if (i > NAMELEN) {
+		if (i >= NAMELEN) {
 			PR_ERR(ctx, "Constant name too long");
-			return 0;
+			return -1;
 		}
 		N[i] = **sp;
 	}
 	N[i] = '\0';
-	if (i == 0) {
-		PR_ERR(ctx, "No Constant name set");
+	if (KW_INVALID != match_keyword(N)) {
+		PR_ERR(ctx, "Constant name '%s' should not be a keyword", N);
+		return -1;
+	}
+	if (find_constant(N, i)) {
+		if (!shutup)
+			PR_NOTICE(ctx, "Constant '%s' redefined", N);
 		return 0;
 	}
 
-	return i;
+	return 1;
 }
 
 // given a single character in c, either return -1 if it is not a
@@ -382,9 +458,9 @@ static int parse_value_quoted(
 		// interpret the next character for a backslash escape
 		if ((*sp)[1] == '\0')
 			goto unterminated;
-		static char *sqspecial = "\\\\''";
-		static char *dqspecial = "n\nr\rt\tv\vf\f\\\\\"\"";
-		char *special = (quote == '\'') ? sqspecial : dqspecial;
+		char *special = (quote == '\'')
+			? "\\\\''"
+			: "n\nr\rt\tv\vf\f\\\\\"\"";
 		for (j = 0; special[j]; j += 2)
 			if ((*sp)[1] == special[j]) {
 				V[i] = special[j+1];
@@ -495,15 +571,16 @@ static int parse_value(
 ) {
 	int quote = QUOTE(**sp) ? *((*sp)++) : '\0';
 
-	if (quote)
-		return parse_value_quoted(ctx, sp, V, Vlen, kind, quote);
-	return parse_value_unquoted(ctx, sp, V, Vlen, kind,
+	return quote
+		? parse_value_quoted(ctx, sp, V, Vlen, kind, quote)
+		: parse_value_unquoted(ctx, sp, V, Vlen, kind,
 					keywords[KW].may_concat);
 }
 
 static int config_read(
-	struct defcon_context *ctx,
-	enum defcon_keyword_id KW
+	struct defcon_context *oldctx,
+	enum defcon_keyword_id KW,
+	char *file
 TSRMLS_DC);
 
 static int config_parse(
@@ -512,7 +589,7 @@ static int config_parse(
 TSRMLS_DC) {
 	char kw[KEYWORDLEN + 1], N[NAMELEN + 1], V[VALUELEN + 1];
 	int Vlen;
-	int i, j;
+	int do_def, i, j;
 	char c, *ps;
 	enum defcon_keyword_id KW;
 	enum defcon_state_id state = ST_KEYWORD;
@@ -553,28 +630,15 @@ TSRMLS_DC) {
 
 		switch (state) {
 		   case ST_KEYWORD:
-			if (0 >= (i = parse_keyword(ctx, &s, kw)))
+			if (KW_INVALID == (KW = parse_keyword(ctx, &s, kw)))
 				return 0;
-
-			KW = match_keyword(kw);
-			if (KW_INVALID == KW) {
-				PR_ERR(ctx, "No valid keyword (%s)", kw);
-				return 0;
-			}
 			Vlen = 0;
-			TRANSIT(keywords[KW].state, " KW %.*s", i, kw);
+			TRANSIT(keywords[KW].state, " KW %s", kw);
 			break;
 		   case ST_CONST_NAME:
-			if (0 >= (i = parse_constantname(ctx, &s, N)))
+			if (0 > (do_def = parse_constantname(ctx, &s, N)))
 				return 0;
-
-			if (KW_INVALID != match_keyword(N)) {
-				PR_ERR(ctx, "Constant name '%s' should"
-					    " not be a keyword", N);
-				return 0;
-			}
-
-			TRANSIT(ST_CONST_EQUAL, " name %.*s", i, N);
+			TRANSIT(ST_CONST_EQUAL, " name %s", N);
 			break;
 		   case ST_CONST_EQUAL:
 			if (*s != '=') {
@@ -606,8 +670,8 @@ const_term:			TRANSIT(ST_KEYWORD, " semicolon");
 				PR_ERR(ctx, "Invalid '%c'", *s);
 				return 0;
 			}
-			if (!add_constant(ctx, KW, N, V, Vlen TSRMLS_CC))
-				return 0;
+			if (do_def)
+				add_constant(ctx, KW, N, V, Vlen TSRMLS_CC);
 			Vlen = 0;
 			if (*s == '\n')
 				ctx->line++;
@@ -635,11 +699,7 @@ require_term:			TRANSIT(ST_KEYWORD, " semicolon");
 				PR_ERR(ctx, "Invalid '%c'", *s);
 				return 0;
 			}
-			struct defcon_context Nctx[1];
-			Nctx->module_number = ctx->module_number;
-			Nctx->file = V;
-			Nctx->line = 1;
-			if (	!config_read(Nctx, KW TSRMLS_CC)
+			if (	!config_read(ctx, KW, V TSRMLS_CC)
 			     && KW == KW_REQUIRE)
 				return 0;
 			Vlen = 0;
@@ -680,8 +740,7 @@ TSRMLS_DC) {
 	struct dirent *de, *dep;
 	DIR *dir = opendir(ctx->file);
 	int len, res;
-	struct defcon_context Nctx[1];
-	char **work;
+	char *file, **work;
 	int i, n_work;
 
 	if (!dir)
@@ -709,15 +768,13 @@ TSRMLS_DC) {
 	qsort(work, n_work, sizeof(*work), read_dir_order);
 	for (res = 1, i = 0; i < n_work; i++) {
 		if (res) {
-			Nctx->module_number = ctx->module_number;
 			len = strlen(work[i]);
-			Nctx->file = emalloc(strlen(ctx->file) + 1 + len + 1);
-			Nctx->line = 1;
-			sprintf(Nctx->file, "%s/%s", ctx->file, work[i]);
-			if (	!config_read(Nctx, KW TSRMLS_CC)
+			file = emalloc(strlen(ctx->file) + 1 + len + 1);
+			sprintf(file, "%s/%s", ctx->file, work[i]);
+			if (	!config_read(ctx, KW, file TSRMLS_CC)
 			     && KW == KW_REQUIRE)
 				res = 0;
-			efree(Nctx->file);
+			efree(file);
 		}
 		efree(work[i]);
 	}
@@ -734,12 +791,18 @@ error:
 }
 
 static int config_read(
-	struct defcon_context *ctx,
-	enum defcon_keyword_id KW
+	struct defcon_context *oldctx,
+	enum defcon_keyword_id KW,
+	char *file
 TSRMLS_DC) {
 	FILE *fd;
 	struct stat st;
 	int res;
+	struct defcon_context ctx[1];
+
+	ctx->module_number = oldctx->module_number;
+	ctx->file = file;
+	ctx->line = 1;
 
 	if (0 > stat(ctx->file, &st))
 		goto error;
@@ -789,15 +852,14 @@ PHP_MINIT_FUNCTION(defcon) {
 
 	struct defcon_context ctx[1];
 	ctx->module_number = module_number;
-	ctx->file = INI_STR("defcon.config-file");
-	ctx->line = 1;
+	char *file = INI_STR("defcon.config-file");
 
-	if(NULL == ctx->file || 0 == strcmp(ctx->file, "")) {
+	if(NULL == file || 0 == strcmp(file, "")) {
 		php_error(E_WARNING, "defcon: No Configfile set...");
 		return SUCCESS;
 	}
 
-	config_read(ctx, KW_INVALID TSRMLS_CC);
+	config_read(ctx, KW_INVALID, file TSRMLS_CC);
 
 	return SUCCESS;
 }
