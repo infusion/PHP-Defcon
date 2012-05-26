@@ -32,7 +32,7 @@
 #include "ext/standard/info.h"
 #include "php_defcon.h"
 
-static function_entry defcon_functions[] = {
+static zend_function_entry defcon_functions[] = {
 	{NULL, NULL, NULL}
 };
 
